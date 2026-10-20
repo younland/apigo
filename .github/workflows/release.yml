@@ -1,0 +1,250 @@
+name: Package
+
+# 打 tag（如 v0.1.0）或手动触发时构建三平台产物：
+#   Windows → apigo.exe（便携）与 "apigo Setup <版本> amd64.exe"（NSIS 安装包，
+#             mygo build 在 Windows 上自行下载 NSIS）
+#   macOS   → 通用包（arm64 + amd64）的 .app 与 .dmg（磁盘映像只能在 macOS 上做；
+#             mygo.json 未配置 macos.signingIdentity，产物未签名）
+#   Linux   → deb 与 tar.gz（amd64 / arm64 原生 runner 矩阵）
+#
+# 版本号来自 tag（去掉 v 前缀），经 task 的 APP_VERSION 变量由 tools/syncversion
+# 写入 mygo.json 后构建（mygo build 没有 -version 参数）。
+# 产物统一命名为 apigo-<版本>-<平台>-<架构>.<格式>，并附 .sha256 校验和。
+# 打 tag 触发时创建/更新 GitHub Release 并附加全部产物；手动触发只上传 workflow artifact。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号，形如 0.1.0（仅手动触发使用）"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: read
+
+env:
+  TASK_VERSION: "3.54.0"
+
+jobs:
+  prepare:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - name: 解析 tag / 手动输入
+        id: resolve
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${INPUT_VERSION#v}"
+            tag="v${version}"
+            publish="false"
+          else
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+            publish="true"
+          fi
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::版本号 ${version} 不是 x.y.z 形式（tag 需要形如 v0.1.0）"
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "publish=${publish}"
+          } >> "${GITHUB_OUTPUT}"
+
+  windows:
+    name: Windows 安装包
+    needs: prepare
+    runs-on: windows-latest
+    env:
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 安装 Task
+        uses: arduino/setup-task@v2
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # sync:version 会先把版本号写进 mygo.json；NSIS 由 mygo build 自行下载。
+      - name: 构建（exe + NSIS 安装包）
+        shell: bash
+        run: task package:windows APP_VERSION="${APP_VERSION}"
+
+      - name: 收集产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "build/windows-amd64/apigo Setup ${APP_VERSION} amd64.exe" \
+             "dist/apigo-${APP_VERSION}-windows-amd64-setup.exe"
+          cp "build/windows-amd64/apigo.exe" \
+             "dist/apigo-${APP_VERSION}-windows-amd64-portable.exe"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS 安装包
+    needs: prepare
+    runs-on: macos-14
+    env:
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 安装 Task
+        uses: arduino/setup-task@v2
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Spotlight 索引 DMG 挂载卷会把挂载点踢掉，打包前关掉（已知抖动）
+      - name: 关闭 Spotlight 索引
+        run: sudo mdutil -a -i off
+
+      - name: 构建（通用包 + dmg）
+        run: task package:darwin APP_VERSION="${APP_VERSION}"
+
+      - name: 收集产物
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ls -l build/darwin-universal
+          dmg="$(ls build/darwin-universal/*.dmg | head -n1)"
+          cp "$dmg" "dist/apigo-${APP_VERSION}-darwin-universal.dmg"
+          ls -l dist
+          test -s "dist/apigo-${APP_VERSION}-darwin-universal.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux 安装包 (${{ matrix.arch }})
+    needs: prepare
+    # arm64 使用 GitHub 原生 arm runner，避免交叉编译的麻烦
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 安装 Task
+        uses: arduino/setup-task@v2
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建（deb + tar.gz）
+        run: task package:linux APP_VERSION="${APP_VERSION}" ARCH=${{ matrix.arch }}
+
+      # 原生 UI 不链接 GTK/WebKit：mygo 的 deb 模板为 webview 应用硬编码了这两个依赖，
+      # 而这里的可执行文件按 CGO_ENABLED=0 构建、动态库都在运行期 dlopen（缺 GL 时退回
+      # CPU 渲染）。删掉 Depends 行，避免 apt 拖入整套 WebKitGTK。
+      # install.sh 的 WebKitGTK 检查同理，会把缺少该库判为安装失败，一并 neutralize。
+      - name: 收集产物（去掉 native UI 不需要的 GTK/WebKit 依赖）
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p dist
+          for f in build/linux-${{ matrix.arch }}/*.deb; do
+            out="dist/apigo-${APP_VERSION}-linux-${{ matrix.arch }}.deb"
+            tmp="$(mktemp -d)"
+            dpkg-deb -R "$f" "$tmp"
+            sed -i '/^Depends:/d' "$tmp/DEBIAN/control"
+            dpkg-deb -b "$tmp" "$out"
+            rm -rf "$tmp"
+          done
+          for f in build/linux-${{ matrix.arch }}/*.tar.gz; do
+            out="dist/apigo-${APP_VERSION}-linux-${{ matrix.arch }}.tar.gz"
+            tmp="$(mktemp -d)"
+            tar -xzf "$f" -C "$tmp"
+            find "$tmp" -name install.sh -exec \
+              sed -i -E 's/^\s*grep -qF -e libwebkit2gtk.*/\treturn 0/' {} \;
+            tar -czf "$out" -C "$tmp" .
+            rm -rf "$tmp"
+          done
+          ls -l dist
+          test -n "$(ls -A dist)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: 创建 Release
+    needs: [prepare, windows, macos, linux]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 创建或更新 Release 并附加产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          (cd dist && for f in apigo-*; do sha256sum "$f" > "$f.sha256"; done)
+          ls -l dist
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --clobber
+          else
+            gh release create "${TAG}" dist/* --title "apigo ${TAG}" --generate-notes
+          fi

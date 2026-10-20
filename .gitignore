@@ -1,0 +1,7 @@
+/build/
+/bin/
+/dist/
+/.mygo/
+/apigo
+/apigo.exe
+mygo_windows_*.syso

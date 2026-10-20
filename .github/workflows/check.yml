@@ -1,0 +1,72 @@
+name: Check
+
+# 推送与 PR 的静态检查：task check（go build/vet + mygo vet + 单元/视图测试 +
+# 竞态检测），外加 Windows 打包冒烟（task package:build：exe + NSIS 安装包）。
+# 本仓库不需要 cgo；命令与本地完全一致，都从 Taskfile.yml 走。
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TASK_VERSION: "3.54.0"
+
+jobs:
+  check:
+    name: 静态检查与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 安装 Task
+        uses: arduino/setup-task@v2
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: go build/vet + mygo vet + 测试 + 竞态
+        run: task check
+
+  windows-build:
+    name: Windows 打包冒烟
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 安装 Task
+        uses: arduino/setup-task@v2
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # mygo build 在 Windows 上会下载自带的 NSIS（GitHub 源，runner 可达），
+      # 因此 runner 上不需要预装 makensis。
+      - name: 构建（exe + NSIS 安装包）
+        shell: bash
+        run: task package:windows
+
+      - name: 校验产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l build/windows-amd64
+          test -f build/windows-amd64/apigo.exe
+          compgen -G "build/windows-amd64/apigo Setup *.exe" >/dev/null \
+            || { echo "::error::缺少 NSIS 安装包"; exit 1; }

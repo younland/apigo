@@ -1,0 +1,112 @@
+version: '3'
+
+# apigo 任务入口（MyGo native UI，不需要 cgo）：
+#   task dev       本地开发（改 Go 代码自动重建并重启窗口）
+#   task run       直接 go run 运行
+#   task build     裸可执行文件到 bin/（版本注入，无安装包）
+#   task package   生产打包 Windows（exe + NSIS 安装包，输出 build/windows-amd64/）
+#
+# 版本号唯一来源是 APP_VERSION（默认 0.1.0）；改版本号用
+#   task sync:version APP_VERSION=1.2.3
+# 它写进 mygo.json —— mygo dev/build 的运行时版本（mygo.App.Version()）、
+# 打包元数据与安装包文件名都读它。CI 打 tag 时用 APP_VERSION=<去掉 v 的 tag> 覆盖。
+#
+# 版本注入走 tools/syncversion，避免 Taskfile 模板里的路径转义问题。
+
+vars:
+  APP_NAME: apigo
+  APP_VERSION: '{{.APP_VERSION | default "0.1.0"}}'
+  BIN_DIR: bin
+  DIST_DIR: dist
+  EXE: '{{if eq OS "windows"}}.exe{{end}}'
+
+tasks:
+  default:
+    desc: 列出全部任务
+    cmds:
+      - task --list
+
+  dev:
+    desc: 开发模式运行（改 Go 代码自动重建并重启窗口）
+    cmds:
+      - go tool mygo dev
+
+  run:
+    desc: 直接 go run 运行
+    cmds:
+      - go run .
+
+  build:
+    desc: 构建裸可执行文件到 bin/（版本注入，无安装包）
+    deps: [sync:version]
+    cmds:
+      - mkdir -p {{.BIN_DIR}}
+      - 'go build -trimpath -ldflags "-s -w{{if eq OS "windows"}} -H=windowsgui{{end}}" -o "{{.BIN_DIR}}/{{.APP_NAME}}{{.EXE}}" .'
+
+  package:
+    desc: 生产打包 Windows（exe + NSIS 安装包，输出 build/windows-amd64/）
+    cmds:
+      - task: package:windows
+
+  package:windows:
+    desc: 打包 Windows（mygo build：exe + NSIS 安装包）
+    deps: [sync:version]
+    cmds:
+      - go tool mygo build -platform windows/amd64
+
+  package:darwin:
+    desc: 打包 macOS 通用包（.app；dmg 只能在 macOS 上生成）
+    deps: [sync:version]
+    cmds:
+      - go tool mygo build -platform darwin/universal
+
+  package:linux:
+    desc: 打包 Linux（deb + tar.gz；ARCH 默认 amd64）
+    deps: [sync:version]
+    cmds:
+      - go tool mygo build -platform linux/{{.ARCH | default "amd64"}}
+
+  package:all:
+    desc: 打包三个平台（macOS 的 dmg 需在 macOS 上生成）
+    cmds:
+      - task: package:windows
+      - task: package:darwin
+      - task: package:linux
+
+  sync:version:
+    desc: 把 APP_VERSION 写入 mygo.json（打包版本来源）
+    cmds:
+      - go run ./tools/syncversion -version '{{.APP_VERSION}}'
+
+  test:
+    desc: 测试（CGO_ENABLED=0，与发布链路一致）
+    env:
+      CGO_ENABLED: '0'
+    cmds:
+      - go test ./...
+
+  test:race:
+    desc: 竞态检测（-race 需要 cgo，故显式启用）
+    env:
+      CGO_ENABLED: '1'
+    cmds:
+      - go test -race ./...
+
+  check:
+    desc: 静态检查与测试（go build/vet + mygo vet + 测试 + 竞态）
+    cmds:
+      - go build ./...
+      - go vet ./...
+      - go tool mygo vet .
+      - task: test
+      - task: test:race
+
+  doctor:
+    desc: 检查 mygo 开发环境是否就绪
+    cmds:
+      - go tool mygo doctor
+
+  clean:
+    desc: 清理构建产物（bin/、build/、dist/、.mygo/）
+    cmds:
+      - '{{if eq OS "windows"}}powershell -NoProfile -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue {{.BIN_DIR}}, build, {{.DIST_DIR}}, .mygo"{{else}}rm -rf {{.BIN_DIR}} build {{.DIST_DIR}} .mygo{{end}}'
