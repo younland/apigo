@@ -9,6 +9,7 @@
     <a href="#features"><img src="https://img.shields.io/badge/UI-Native_UI-2D9CDB?style=for-the-badge" alt="Native UI" /></a>
     <a href="#install"><img src="https://img.shields.io/badge/Platform-Windows_%7C_macOS_%7C_Linux-4B5563?style=for-the-badge" alt="Windows | macOS | Linux" /></a>
     <a href="#status"><img src="https://img.shields.io/badge/Status-early_development-F2994A?style=for-the-badge" alt="early development" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-3DA639?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="MIT License" /></a>
   </p>
   <p>
     <a href="#about">项目说明</a> ·
@@ -163,6 +164,7 @@ git push origin v0.1.0     # 触发 Package，版本号取自 tag（去掉 v 前
 apigo/
 ├── main.go                      # 入口：app 状态、view 视图、窗口创建
 ├── main_test.go                 # ui.NewTester 视图测试（点击 / 输入 / 文本断言）
+├── LICENSE                      # MIT 协议
 ├── mygo.json                    # 应用元信息与构建输出目录
 ├── go.mod                       # 模块 apigo；Go 1.27.2；pin mygo v0.5.5 作为 tool
 ├── Taskfile.yml                 # 任务入口：dev / build / package:* / check / sync:version
@@ -205,4 +207,4 @@ apigo/
 <a id="license"></a>
 ## 📜 开源协议
 
-本仓库尚未添加 `LICENSE` 文件；如需开源，请先补充协议文本再对外发布。
+本项目采用 [MIT 协议](LICENSE)，Copyright (c) 2026 younland。
