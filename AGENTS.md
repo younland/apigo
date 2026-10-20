@@ -131,6 +131,77 @@
   - **正确做法**：`CGO_ENABLED`、`GOFLAGS` 等一律写在任务的 `env:` 块；版本号这类参数通过 Task 变量（`task package:windows APP_VERSION=1.2.3`）传入，再交给 `tools/syncversion` 落盘。
   - **验证方式**：`task --list` 有该任务，且 `task <name> APP_VERSION=1.2.3` 后 `grep version mygo.json` 为新值。
   - **适用范围**：`Taskfile.yml` 全部任务。
+- **标题**：`ui.Tester.Find` 按无障碍标签匹配，同屏重复文案会命中先构建的那个
+  - **触发信号**：断言某区域的 `Rect` 却落在别的区域（顶部栏的“REST”抢了图标栏的“REST”）。
+  - **根因/约束**：`Find` 遍历标签列表返回首个同名项，文本与 `.Label()` 共用同一匹配空间。
+  - **正确做法**：同屏不要复用同一文案；容器用 `.Label()` 给唯一名字再断言，或把断言目标换成该区域独有的文本。
+  - **验证方式**：测试通过且 `Rect` 落在预期区域内（X/Y 边界断言）。
+  - **适用范围**：所有 `ui.Tester` 布局断言。
+- **标题**：`c.SetTheme` 之后无法再把窗口交还给系统主题
+  - **触发信号**：实现「跟随系统 / 浅色 / 深色」切换时，切回跟随系统不再随桌面变化。
+  - **根因/约束**：`SetTheme` 直接替换 `c.theme`，MyGo 没有 reset 或读取系统外观的独立 API；`c.Theme().Dark` 在替换后反映的是自己的主题。
+  - **正确做法**：`System` 模式完全不调用 `SetTheme`（保留窗口自己的跟随行为）；固定外观缓存一个 `*ui.Theme` 只在模式变化时下发；从固定切回 `System` 只能沿用最后一次观测到的系统外观，需在设置页注明。
+  - **验证方式**：切到深色再切回跟随系统，界面不闪、保持系统最后外观；OS 改外观后仅首次跟随阶段生效。
+  - **适用范围**：`app.go` 的外观解析、设置页外观分区。
+- **标题**：延迟增删用的索引字段拿零值当「无操作」，会每帧删掉第一项
+  - **触发信号**：键值列表每帧少一行、Query 参数在发送时消失（`widgets/kvlist.go` 的 `remove`）。
+  - **根因/约束**：`remove int` 的零值是 0，和「删除第 0 行」无法区分，`if remove >= 0` 的守卫恒真。
+  - **正确做法**：索引用 1-based 哨兵（0 = 无操作），或额外配一个 `bool`；延迟动作在构建前统一 `Flush`，并给「无操作」路径写用例。
+  - **验证方式**：`go test ./widgets`；填入参数后发送，服务端收到该参数。
+  - **适用范围**：所有把增删/重排推迟到下一帧的列表状态。
+- **标题**：`ui.Checkbox` 的第三个参数是可见标签文本，不是无障碍名
+  - **触发信号**：键值表格每行都多出一段“启用”文字，与原版（只有方框）不一致。
+  - **正确做法**：`ui.Checkbox(c, &v, "")` 传空标签，再用 `.Label(fmt.Sprintf("启用第 %d 行", i+1))` 补无障碍名；行内控件需要唯一名字时优先 `.Label()` 而不是可见文本。
+  - **验证方式**：截图里没有多余文字；`ui.Tester` 仍能按 `Label` 找到控件。
+  - **适用范围**：`widgets/kvlist.go` 及任何表格/列表行内的勾选框、按钮。
+- **标题**：`editor.State` 的 `LineNumbers` 零值是 `LineNumbersOn`，关行号要显式写 `LineNumbersOff`
+  - **触发信号**：只读响应正文多出列行号，或注释里写着“关行号”却不生效。
+  - **根因/约束**：枚举把 `LineNumbersOn` 放在 0 位，零值即开启；`bool` 式的直觉判断会失效。
+  - **正确做法**：需要关行号时显式赋 `editor.LineNumbersOff`；新增 `editor` 选项前先读 `ui/editor/state.go` 的常量顺序。
+  - **验证方式**：离屏截图确认正文无行号；`TestResponseRenderedAsReadOnlyJSON` 之类的状态断言。
+  - **适用范围**：`app.go` 的 `bodyEdit`/`respEdit` 配置。
+- **标题**：条件分支里重复构造同一个控件，两份都会挂到父节点
+  - **触发信号**：紧凑模式下列表仍按宽松宽度渲染，另一个输入框被挤出面板（侧栏环境变量行）。
+  - **根因/约束**：`ui.TextInput(c, ...)` 一构造就挂到当前父节点；`if compact { x = ui.TextInput(...) }` 只换了变量，先构造的那份仍在树上。
+  - **正确做法**：控件只构造一次，再按条件改尺寸；布局差异大时拆成两个互斥函数（`row` / `compactRow`），各自构造各自的全部子元素。
+  - **验证方式**：离屏截图确认窄面板内两个输入框都可见；`ui.Tester.Find` 的宽度断言。
+  - **适用范围**：`widgets/kvlist.go` 及所有在分支里建控件的视图。
+- **标题**：用 `TextInput.Changed()` 当脏标记会在没编辑时误报
+  - **触发信号**：切换标签页后，未改动的标签也显示“有未保存内容”的圆点；用 `t.touch()` 挂在 `Changed()` 上尤其明显。
+  - **根因/约束**：`Changed()` 报告的是本次构建里绑定值发生了变化，聚焦/失焦与外部写入（切换标签时重新绑定）都会命中，和“用户编辑过”不是一回事。
+  - **正确做法**：脏标记改为可判定的内容判定（URL/body/键值行是否有值），或自行比较上一帧快照；`Changed()` 只用于需要“值变了就做事”的场景（如切语言）。
+  - **验证方式**：新建多个标签、只编辑其中一个，未编辑项不出现圆点。
+  - **适用范围**：`view_tabs.go` 的圆点、任何需要“用户是否改过”的界面状态。
+- **标题**：集合拥有工作区，请求标签不能放回全局 app
+  - **触发信号**：切换集合后仍看到上一个集合的请求标签；关闭集合再打开，旧标签又出现。
+  - **根因/约束**：标签属于集合的 `workspace`（每个集合一份），不是窗口全局状态；主窗口没有工作区。
+  - **正确做法**：`app.spaces map[collectionID]*workspace`，所有标签操作都带 `ws` 参数；`current()` 在 `active == ""` 时返回 nil，视图只在集合激活时构建请求区；集合关闭时删除对应 workspace。
+  - **验证方式**：开两个集合各建标签，来回切换互不串；关闭集合后重开是空白标签。
+  - **适用范围**：`app.go`、`view.go`、`view_tabs.go`、`view_requests.go`。
+- **标题**：`store` 的查询函数返回切片元素副本，改它不会写回
+  - **触发信号**：删除激活环境后想把剩下的第一个设为激活却无效；变量改了文件没变。
+  - **根因/约束**：`environmentsFor`/类似函数返回 `[]environment` 值拷贝，改元素只改拷贝。
+  - **正确做法**：需要修改时按下标遍历 `s.environments`，或用 `environment(id) *environment` 取指针再改，最后统一 `saveEnvironments()`。
+  - **验证方式**：`TestEnvironmentLifecycle` 删除激活环境后另一个自动激活并落盘。
+  - **适用范围**：`service_store.go` 及所有返回存储切片的查询。
+- **标题**：集合是一个目录，接口与环境的名字就是文件名，同名必须编号
+  - **触发信号**：建两个叫 `Untitled` 的接口，树里只剩一个；改名后旧文件还在，列表里出现"幽灵"接口。
+  - **根因/约束**：磁盘布局是「目录=文件夹、`<名字>.yaml`=接口/环境」，身份是路径而不是 id；同名会写到同一个文件，改名不删旧文件就会读回两个。
+  - **正确做法**：写盘前用 `uniqueName(taken, name)` 编号（`safeFileName` 去掉平台非法字符）；改名/删除走「写新文件 + `pruneEnvDir` 清旧文件」，不要 `os.Rename` 到未校验的名字；`collection.ID` 用目录名（`uniqueCollectionID` 保证唯一）。
+  - **验证方式**：`TestCollectionLayoutOnDisk`、`TestNewInterfaceWritesFile`、`TestEnvironmentRenameMovesFile`。
+  - **适用范围**：`service_store.go`、`service_tree.go`、`service_env.go`、所有新增写盘路径。
+- **标题**：`folder.Path` 的空串是「根目录」，不能拿空串当"没有文件夹"
+  - **触发信号**：根目录折叠状态或它的新建接口菜单作用到了别的文件夹，或者根目录无法折叠。
+  - **根因/约束**：根目录是集合自己的目录，路径就是空串；`foldersClosed`、`folderMenus` 都以 Path 为键，空串是合法键。
+  - **正确做法**：树里所有位置判断用 `findFolder(&col.Root, path)`（找不到才是 nil），折叠/菜单状态直接以 Path 为键，别用"key 为空就是无操作"的约定。
+  - **验证方式**：`TestFolderTreeAddsAndNavigates` 折叠「文件夹 根目录」后整棵树隐藏。
+  - **适用范围**：`app.foldersClosed`、`app.folderMenus`、`view_requests.go`、`service_tree.go`。
+- **标题**：接口的编辑只在离开标签时写回，写失败必须让人看见
+  - **触发信号**：改了 URL/请求体但 `<接口名>.yaml` 没变；或文件写失败却毫无提示。
+  - **根因/约束**：标签是内存里的编辑态，磁盘上的接口文件才是真相；`tab.path` 记住它来自哪个接口文件，没有 path 的标签（新建、复制）不写盘，写盘走 `store.updateRequest`（只改那一个文件，不重写整棵树）。
+  - **正确做法**：所有让工作区离开当前标签的动作（切换、新建、复制、关闭、关闭其他、关闭集合）先经 `leaveTab`/`saveTab`；失败记进 `a.saveErr`，下一帧在根视图 `c.Toast` 一次，别静默吞掉。删除集合时用 `forgetCollection`（集合已不存在，不能再写回）。
+  - **验证方式**：`TestTabSwitchWritesInterfaceFile`、`TestCloseTabWritesInterfaceFile`、`TestFailedInterfaceSaveIsReported`。
+  - **适用范围**：`app.go`（`leaveTab`/`saveTab`/`closeCollection`）、`view_tabs.go`、`service_tree.go`（`updateRequest`）。
 
 ## 编码与重构规范
 
