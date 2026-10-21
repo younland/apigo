@@ -184,31 +184,18 @@ jobs:
       - name: 构建（deb + tar.gz）
         run: task package:linux APP_VERSION="${APP_VERSION}" ARCH=${{ matrix.arch }}
 
-      # 原生 UI 不链接 GTK/WebKit：mygo 的 deb 模板为 webview 应用硬编码了这两个依赖，
-      # 而这里的可执行文件按 CGO_ENABLED=0 构建、动态库都在运行期 dlopen（缺 GL 时退回
-      # CPU 渲染）。删掉 Depends 行，避免 apt 拖入整套 WebKitGTK。
-      # install.sh 的 WebKitGTK 检查同理，会把缺少该库判为安装失败，一并 neutralize。
-      - name: 收集产物（去掉 native UI 不需要的 GTK/WebKit 依赖）
+      # 原生 UI 不显示网页：mygo.json 的 "linux": {"webview": false} 让 deb 只依赖
+      # GTK、install.sh 不再要求 WebKitGTK，这里只按发布命名收集产物。
+      - name: 收集产物
         run: |
           set -euo pipefail
           shopt -s nullglob
           mkdir -p dist
           for f in build/linux-${{ matrix.arch }}/*.deb; do
-            out="dist/apigo-${APP_VERSION}-linux-${{ matrix.arch }}.deb"
-            tmp="$(mktemp -d)"
-            dpkg-deb -R "$f" "$tmp"
-            sed -i '/^Depends:/d' "$tmp/DEBIAN/control"
-            dpkg-deb -b "$tmp" "$out"
-            rm -rf "$tmp"
+            cp "$f" "dist/apigo-${APP_VERSION}-linux-${{ matrix.arch }}.deb"
           done
           for f in build/linux-${{ matrix.arch }}/*.tar.gz; do
-            out="dist/apigo-${APP_VERSION}-linux-${{ matrix.arch }}.tar.gz"
-            tmp="$(mktemp -d)"
-            tar -xzf "$f" -C "$tmp"
-            find "$tmp" -name install.sh -exec \
-              sed -i -E 's/^\s*grep -qF -e libwebkit2gtk.*/\treturn 0/' {} \;
-            tar -czf "$out" -C "$tmp" .
-            rm -rf "$tmp"
+            cp "$f" "dist/apigo-${APP_VERSION}-linux-${{ matrix.arch }}.tar.gz"
           done
           ls -l dist
           test -n "$(ls -A dist)"
