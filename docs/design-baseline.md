@@ -139,10 +139,10 @@
 |---|---|---|
 | 字形宽度与原版不同 | 原版内嵌 Inter Variable，apigo 内嵌 HarmonyOS Sans SC（中文字形更贴合，拉丁字母略宽） | 以尺寸与色值为准；关键标签 `SingleLine` + 省略号；标签页给 `design.TabMinWidth` 兜底；不再追求逐字对齐 |
 | URL / Body 内 `{{var}}` 无法内联着色 | `ui.TextInput` 不支持富文本 | 首版发送前校验并 Toast 提示；后续用 overlay 方案 |
-| 应用内菜单不再是系统菜单 | MyGo 系统菜单只支持纯文本、无图标 | 集合行、集合标签右键、请求标签右键、方法下拉、类型筛选、行尾新建都用 `view_menu.go` 的 `popoverMenu`/`Popover` 自绘；应用里已没有 `ContextMenu` |
+| 应用内菜单不再是系统菜单 | MyGo 系统菜单只支持纯文本、无图标 | 集合行、集合标签右键、请求标签右键、方法下拉、类型筛选、行尾新建都用 `internal/app/view_menu.go` 的 `popoverMenu`/`Popover` 自绘；应用里已没有 `ContextMenu` |
 | 删除集合是伪删除 | 误删一个集合会连带丢掉整目录的接口与环境，代价太高 | 确认后只把集合记进数据目录根的 `hidden.yaml` 并从列表移除，目录、接口文件与环境文件原地保留；想找回就删掉那一行 |
 | 请求标签无拖拽重排 | TabsBase 无重排能力 | 首版不做，列入后续 |
-| 请求体格式改为胶囊行、不再是下拉 | 图 2 的格式选择是一整行胶囊，选中的填色；下拉在这个位置反而多一次点击 | `view_request.go` 的 `bodyFormatStrip` 直接铺出九种格式（`bodyFormats` 单一真相源），右端补上该格式的 Content-Type 与必填星号 |
+| 请求体格式改为胶囊行、不再是下拉 | 图 2 的格式选择是一整行胶囊，选中的填色；下拉在这个位置反而多一次点击 | `internal/app/view_request.go` 的 `bodyFormatStrip` 直接铺出九种格式（`bodyFormats` 单一真相源），右端补上该格式的 Content-Type 与必填星号 |
 | Binary / msgpack 只能选、不能发 | 需要选文件并按字节发送；这两个格式目前还没有字节编辑器（form-data 的文件字段已经能选文件并上传） | 选中时显示「需要选择文件，暂未实现」，`bodyReader` 不发送 body 也不带 Content-Type |
 | GraphQL 用 JSON 高亮 | MyGo 0.6.0 的编辑器语法表里没有 GraphQL | 用 JSON 语言渲染 GraphQL 文档（`{"query":…,"variables":…}`），发送前按 JSON 校验、Content-Type 为 `application/json` |
 | 选「跟随系统」后无法再随桌面变化 | `SetTheme` 之后无法交还给系统主题（MyGo 没有 reset） | 启动时取桌面亮暗并下发我们自己的主题（控件与自绘配色一致），会话内固定；重启恢复跟随 |

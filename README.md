@@ -40,33 +40,33 @@ apigo 是一个用 Go 编写、由 MyGo 原生 UI 直接绘制的接口调试工
 
 | 能力 | 现状 |
 |---|---|
-| 原生 UI 单窗口（自绘界面，无 WebView） | 已实现：`main.go` 的 `app.view` |
+| 原生 UI 单窗口（自绘界面，无 WebView） | 已实现：`internal/app/view.go`（`app.view`）+ `internal/app/run.go` |
 | 窗口尺寸与位置记忆 | 已实现：`mygo.WindowOptions.StateKey` |
-| 布局：集合标签条 40 / 左侧接口树 240（铺满高）/ 右侧请求面板（顶部请求页签 40 + 请求-响应分栏）/ 状态栏 32 | 已实现：`view.go`、`view_topbar.go`、`view_tabs.go`、`view_requests.go` |
-| 集合：顶部标签切换、关闭（先弹窗确认）、右键弹出应用自绘菜单（关闭集合/关闭其他集合）、`…` 里重开最近关闭的集合 | 已实现：`view_topbar.go` + `view_menu.go` + `view_confirm.go` |
-| 接口树：「根目录」（集合自己的目录）行尾是「筛选」与「新建」菜单（新建文件夹 + 六种接口类型），**根目录没有「⋮」**（没有可重命名/移动/删除的东西），子文件夹与叶子接口按层缩进、可折叠；搜索与类型筛选；整行即按钮、整行手型指针；行悬浮换底色，当前激活标签页对应的接口行用主题色标出（草稿标签没有落盘位置，不点亮）；子文件夹与接口行尾（`+` 之后）的竖向「⋮」按钮打开行菜单（其余 more 菜单仍横向），右键不再弹：接口有 `重命名 / 复制接口 / 移动接口 / 删除接口`，文件夹有 `重命名 / 移动文件夹 / 删除文件夹`，删除项警示红字、删除前弹窗确认（真实删除文件与目录），移动与重命名走文件夹/命名弹窗 | 已实现：`view_requests.go` + `view_menu.go` + `service_tree.go` + `service_move.go` |
-| 主窗口：有集合时头部「导入集合」（占位）+「新建集合」（弹窗输入名称）与集合列表（行尾 `…` 自绘菜单：打开文件夹 / 打开集合 / 重命名集合 / 删除集合；删除先弹窗警示，确认后只从列表移除、文件夹保留）；无集合时只显示居中引导与「新建集合 / 从集合文件导入」 | 已实现：`view_home.go` + `view_confirm.go` + `service_hidden.go`（打开文件夹经 `mygo.Shell.OpenPath`） |
+| 布局：集合标签条 40 / 左侧接口树 240（铺满高）/ 右侧请求面板（顶部请求页签 40 + 请求-响应分栏）/ 状态栏 32 | 已实现：`internal/app/view.go`、`internal/app/view_topbar.go`、`internal/app/view_tabs.go`、`internal/app/view_requests.go` |
+| 集合：顶部标签切换、关闭（先弹窗确认）、右键弹出应用自绘菜单（关闭集合/关闭其他集合）、`…` 里重开最近关闭的集合 | 已实现：`internal/app/view_topbar.go` + `internal/app/view_menu.go` + `internal/app/view_confirm.go` |
+| 接口树：「根目录」（集合自己的目录）行尾是「筛选」与「新建」菜单（新建文件夹 + 六种接口类型），**根目录没有「⋮」**（没有可重命名/移动/删除的东西），子文件夹与叶子接口按层缩进、可折叠；搜索与类型筛选；整行即按钮、整行手型指针；行悬浮换底色，当前激活标签页对应的接口行用主题色标出（草稿标签没有落盘位置，不点亮）；子文件夹与接口行尾（`+` 之后）的竖向「⋮」按钮打开行菜单（其余 more 菜单仍横向），右键不再弹：接口有 `重命名 / 复制接口 / 移动接口 / 删除接口`，文件夹有 `重命名 / 移动文件夹 / 删除文件夹`，删除项警示红字、删除前弹窗确认（真实删除文件与目录），移动与重命名走文件夹/命名弹窗 | 已实现：`internal/app/view_requests.go` + `internal/app/view_menu.go` + `internal/store/service_tree.go` + `internal/store/service_move.go` |
+| 主窗口：有集合时头部「导入集合」（占位）+「新建集合」（弹窗输入名称）与集合列表（行尾 `…` 自绘菜单：打开文件夹 / 打开集合 / 重命名集合 / 删除集合；删除先弹窗警示，确认后只从列表移除、文件夹保留）；无集合时只显示居中引导与「新建集合 / 从集合文件导入」 | 已实现：`internal/app/view_home.go` + `internal/app/view_confirm.go` + `internal/store/service_hidden.go`（打开文件夹经 `mygo.Shell.OpenPath`） |
 | 集合重命名：改名同时重命名集合目录，`.env/`、接口文件与 `apigo.yaml` 一起搬，已打开的集合与标签跟到新 id | 已实现：`store.renameCollection` + `app.renameCollection` |
-| 新建接口：REST / GraphQL / WebSocket / SSE / Socket.IO / MQTT 六类，先开草稿标签（默认不落盘），`Ctrl+S` 时在弹窗里改名并选存放的文件夹再写成 `<接口名>.yaml`（默认位置就是按下 `+` 的那个）；标签标题后的灰点表示未保存；新建文件夹弹窗只问名称，同一层级不允许重名 | 已实现：`view_requests.go` + `app_tree.go` + `view_picker.go` |
-| 请求标签：每个集合独立的一组标签，新建/切换/关闭/复制/重命名（右键弹出应用自绘菜单）；一个接口只有一个标签，再次打开只把它切到前面；单个标签最宽 260、超长标题省略，标签条隐藏滚动条但可滚动；右端只有环境选择器（原来的眼睛按钮已移除）；**集合刚打开时没有任何标签，连标签条都不画**，请求区只显示「开始提示面板」（标题 + 说明 + 四行动作与按键），打开或新建接口才出现标签条与请求面板，关掉最后一个标签又回到提示面板 | 已实现：`view_tabs.go` + `workspace` |
-| 环境：集合自带「本地 / 测试 / 生产」，各含 `BaseURL`；支持新建、删除、改名、激活。选择器的下拉用主题色打勾 + 高亮标记激活的环境；管理弹窗两栏（左列表 / 右编辑，高 560），列表里点一行即激活并切到它编辑（打勾跟随），环境变量一行一个（变量名 + 值 + 警示色删除图标），没有「添加行」；底部 `取消` / `保存`（保存按钮为主题色），改名、切激活、增删改变量都只改内存，点保存才一次写盘，取消或 Esc 全部退回 | 已实现：`service_env.go` + `view_env.go` |
-| 变量替换：`{{name}}` 用于 URL/参数/请求头/请求体；未解析则拒绝发送 | 已实现：`service_vars.go` + `app.send` |
-| 持久化：一个集合一个目录（`apigo.yaml` + `.env/` + `static/` + 每个接口一个 YAML），原子写入；写到一半的文件等在集合根目录的 `.tmp/` 里，崩溃残留的在打开集合时清掉 | 已实现：`service_store.go`、`service_tree.go`、`service_env.go`（`gopkg.in/yaml.v3`）、`service_yaml.go` |
-| 文件同步：打开集合时整份重读；之后用 `mygo.WatchFiles` 递归监听集合目录（150ms 去抖），外部改了文件立刻刷新树表（接口没了的标签退回草稿），`.env`、`static` 与点开头的目录不监听 | 已实现：`service_reload.go` + `app_watch.go` |
+| 新建接口：REST / GraphQL / WebSocket / SSE / Socket.IO / MQTT 六类，先开草稿标签（默认不落盘），`Ctrl+S` 时在弹窗里改名并选存放的文件夹再写成 `<接口名>.yaml`（默认位置就是按下 `+` 的那个）；标签标题后的灰点表示未保存；新建文件夹弹窗只问名称，同一层级不允许重名 | 已实现：`internal/app/view_requests.go` + `internal/app/app_tree.go` + `internal/app/view_picker.go` |
+| 请求标签：每个集合独立的一组标签，新建/切换/关闭/复制/重命名（右键弹出应用自绘菜单）；一个接口只有一个标签，再次打开只把它切到前面；单个标签最宽 260、超长标题省略，标签条隐藏滚动条但可滚动；右端只有环境选择器（原来的眼睛按钮已移除）；**集合刚打开时没有任何标签，连标签条都不画**，请求区只显示「开始提示面板」（标题 + 说明 + 四行动作与按键），打开或新建接口才出现标签条与请求面板，关掉最后一个标签又回到提示面板 | 已实现：`internal/app/view_tabs.go` + `workspace` |
+| 环境：集合自带「本地 / 测试 / 生产」，各含 `BaseURL`；支持新建、删除、改名、激活。选择器的下拉用主题色打勾 + 高亮标记激活的环境；管理弹窗两栏（左列表 / 右编辑，高 560），列表里点一行即激活并切到它编辑（打勾跟随），环境变量一行一个（变量名 + 值 + 警示色删除图标），没有「添加行」；底部 `取消` / `保存`（保存按钮为主题色），改名、切激活、增删改变量都只改内存，点保存才一次写盘，取消或 Esc 全部退回 | 已实现：`internal/store/service_env.go` + `internal/app/view_env.go` |
+| 变量替换：`{{name}}` 用于 URL/参数/请求头/请求体；未解析则拒绝发送 | 已实现：`internal/store/vars.go` + `app.send` |
+| 持久化：一个集合一个目录（`apigo.yaml` + `.env/` + `static/` + 每个接口一个 YAML），原子写入；写到一半的文件等在集合根目录的 `.tmp/` 里，崩溃残留的在打开集合时清掉 | 已实现：`internal/store/service_store.go`、`internal/store/service_tree.go`、`internal/store/service_env.go`（`gopkg.in/yaml.v3`）、`internal/store/service_yaml.go` |
+| 文件同步：打开集合时整份重读；之后用 `mygo.WatchFiles` 递归监听集合目录（150ms 去抖），外部改了文件立刻刷新树表（接口没了的标签退回草稿），`.env`、`static` 与点开头的目录不监听 | 已实现：`internal/store/service_reload.go` + `internal/app/app_watch.go` |
 | 接口写回：切换 / 新建 / 复制 / 关闭标签与关闭集合时，把当前标签写回它的接口文件，`Ctrl+S` 随时手动保存，写失败会提示；标签重命名会连接口文件一起改名 | 已实现：`app.saveTab` + `app.saveCurrent` + `store.updateRequest` |
-| 历史：发送即记录（方法/URL/状态），左侧面板头部的手表按钮可切换查看并重开 | 已实现：`app.apply` + `view_requests.go` |
-| 请求行：方法下拉（彩色）、URL、发送、`Ctrl+Enter` | 已实现：`view_request.go` |
-| Params / Headers 键值编辑（增删、启用开关、末尾自动空行——没有「添加行」按钮，在新行里输入即可、窄栏紧凑模式）；请求子标签目前只开 Params / Headers / Body，Authorization / Pre-request / Scripts / Tests 暂不显示 | 已实现：`widgets/kvlist.go` + `view_request.go` |
-| 请求体：格式胶囊一行选（`none` / `form-data` / `x-www-form-urlencoded` / `JSON` / `XML` / `Text` / `Binary` / `GraphQL` / `msgpack`），右端显示该格式的 Content-Type 与必填星号；JSON/GraphQL/XML/Text 走代码编辑器（高亮、行号、JSON 校验、魔杖「美化」），两个表单格式用键值表并按 `multipart` / urlencoded 发送；Binary、msgpack 需要选文件（暂未实现） | 已实现：`app.bodyFormats` + `view_request.go` + `service_http.go` |
-| form-data 文件上传：字段值可以是文本或文件，`选择文件` 打开系统文件对话框，文件复制进集合的 `static/<日期>/<sha256>`，值列显示文件胶囊与原始文件名的文本；换文件 / 清除 / 删行会删掉旧文件，接口文件记相对路径与原始名 | 已实现：`service_static.go` + `app.pickFormFile` + `widgets/kvlist.go`（`main.go` 的 `chooseUpload`） |
-| 响应：状态码/耗时/大小；Content-Type 为 JSON（或正文能按 JSON 解析）时用代码编辑器只读渲染，并自动按两空格缩进格式化；错误态与重试 | 已实现：`view_response.go` + `service_http.go` |
-| 网络执行：10 MB 上限、30 s 超时、结果经 `Window.Update` 回主线程 | 已实现：`service_http.go`（取消待补） |
+| 历史：发送即记录（方法/URL/状态），左侧面板头部的手表按钮可切换查看并重开 | 已实现：`app.apply` + `internal/app/view_requests.go` |
+| 请求行：方法下拉（彩色）、URL、发送、`Ctrl+Enter` | 已实现：`internal/app/view_request.go` |
+| Params / Headers 键值编辑（增删、启用开关、末尾自动空行——没有「添加行」按钮，在新行里输入即可、窄栏紧凑模式）；请求子标签目前只开 Params / Headers / Body，Authorization / Pre-request / Scripts / Tests 暂不显示 | 已实现：`internal/widgets/kvlist.go` + `internal/app/view_request.go` |
+| 请求体：格式胶囊一行选（`none` / `form-data` / `x-www-form-urlencoded` / `JSON` / `XML` / `Text` / `Binary` / `GraphQL` / `msgpack`），右端显示该格式的 Content-Type 与必填星号；JSON/GraphQL/XML/Text 走代码编辑器（高亮、行号、JSON 校验、魔杖「美化」），两个表单格式用键值表并按 `multipart` / urlencoded 发送；Binary、msgpack 需要选文件（暂未实现） | 已实现：`app.bodyFormats` + `internal/app/view_request.go` + `internal/req/http.go` |
+| form-data 文件上传：字段值可以是文本或文件，`选择文件` 打开系统文件对话框，文件复制进集合的 `static/<日期>/<sha256>`，值列显示文件胶囊与原始文件名的文本；换文件 / 清除 / 删行会删掉旧文件，接口文件记相对路径与原始名 | 已实现：`internal/store/service_static.go` + `app.pickFormFile` + `internal/widgets/kvlist.go`（`internal/app/run.go` 的 `chooseUpload`） |
+| 响应：状态码/耗时/大小；Content-Type 为 JSON（或正文能按 JSON 解析）时用代码编辑器只读渲染，并自动按两空格缩进格式化；错误态与重试 | 已实现：`internal/app/view_response.go` + `internal/req/http.go` |
+| 网络执行：10 MB 上限、30 s 超时、结果经 `Window.Update` 回主线程 | 已实现：`internal/req/http.go`（取消待补） |
 | 外观：跟随系统（启动时取桌面亮暗）/ 浅色 / 深色 / 纯黑，窗口主题与控件配色都由 app 下发 | 已实现：`app.themeFor` + `internal/design.Theme` |
-| 设置：右上齿轮打开的弹窗，分「通用（语言 简体中文）/ 主题（背景四选一 + 9 种强调色）/ 数据（数据目录含更换/打开、版本）」三段 | 已实现：`view_env.go` + `internal/design/accent.go` |
-| 界面字体：内嵌 HarmonyOS Sans SC 并默认启用，等宽场景用系统 monospace | 已实现：`font.go` + `design.FontFamily` |
+| 设置：右上齿轮打开的弹窗，分「通用（语言 简体中文）/ 主题（背景四选一 + 9 种强调色）/ 数据（数据目录含更换/打开、版本）」三段 | 已实现：`internal/app/view_env.go` + `internal/design/accent.go` |
+| 界面字体：内嵌 HarmonyOS Sans SC 并默认启用，等宽场景用系统 monospace | 已实现：`internal/assets/font.go` + `design.FontFamily` |
 | 非 REST 接口的执行（GraphQL/WebSocket/SSE/Socket.IO/MQTT） | 未实现（打开显示占位） |
 | 响应头表格、JSON 折叠树、集合导入导出 | 未实现 |
-| 视图离屏测试与截图 | 已实现：`main_test.go`、`collections_test.go` 断言行为，`shot_test.go` 出 PNG |
+| 视图离屏测试与截图 | 已实现：`internal/app/main_test.go`、`internal/store/collections_test.go` 断言行为，`internal/app/shot_test.go` 出 PNG |
 
 <a id="features"></a>
 ## ✨ 核心特性
@@ -185,58 +185,70 @@ git push origin v0.1.0     # 触发 Package，版本号取自 tag（去掉 v 前
 
 ```text
 apigo/
-├── main.go                      # 入口：窗口创建与 App.Run
-├── app.go                       # 应用状态：集合工作区、环境、外观、请求/响应动作
-├── font.go                      # 内嵌界面字体（HarmonyOS Sans SC）并在启动时注册
-├── view.go                      # 根布局：集合标签条 / 主窗口或集合工作区 / 状态栏
-├── view_topbar.go               # 集合标签条：主窗口、集合切换与关闭、最近关闭、设置
-├── view_home.go                 # 主窗口：集合列表、新建/打开/打开文件夹/删除、空状态引导
-├── view_requests.go             # 左侧接口面板：搜索、历史、接口树、每行行尾的新建菜单与根目录行的筛选、右键菜单
-├── view_menu.go                 # 应用自绘菜单：图标 + 文本的 popover 菜单（删除项用警示色）
-├── view_confirm.go              # 确认弹窗：标题 + 说明 + 取消/确认（危险动作的按钮用 Danger 色），顶部居中
-├── view_picker.go               # 文件夹选择弹窗：保存接口与移动接口/文件夹共用
-├── app_tree.go                  # 树的动作：保存、移动、删除接口与文件夹，标签的跟随与关闭
-├── view_tabs.go                 # 请求标签页：新建、切换、关闭、右键自绘菜单、环境选择器
-├── view_kind.go                 # 接口类型图标与类型菜单
-├── view_env.go                  # 环境弹窗与设置弹窗（通用/主题/数据三段）
-├── view_request.go              # 请求行、请求子标签与面板
-├── view_response.go             # 响应 meta 栏与空状态
-├── view_footer.go               # 状态栏（集合名、接口类型、版本）
-├── service_http.go              # 请求执行（goroutine + Window.Update，超时与 10 MB 上限）
-├── service_store.go             # 数据目录布局：collections/ 的读写、集合索引、路径
-├── service_collection.go        # 集合的新建/重命名（连目录）
-├── service_hidden.go            # 删除集合是伪删除：记进 hidden.yaml，目录留在原处
-├── service_static.go            # 上传文件：复制进 static/<日期>/<sha256>，按字段删除
-├── service_reload.go            # 文件同步：整份重读集合、文件签名、清理 .tmp 残留
-├── service_tree.go              # 接口树与磁盘映射：目录=文件夹、<接口名>.yaml=接口
-├── service_move.go              # 接口/文件夹的移动（文件或目录跟着搬）与真实删除
-├── service_env.go               # 环境：每个环境一个 .env/<环境>.yaml
-├── service_history.go           # 请求历史（一个文件，最多 200 条）
-├── service_settings.go          # 设置的持久化：外观、强调色、语言（settings.yaml）
-├── service_location.go          # 数据目录的选择：location.yaml 指向用户换过的目录
-├── service_yaml.go              # YAML 读写、文件名净化、id 编号
-├── service_kind.go              # 六种接口类型与它们的显示名
-├── service_vars.go              # {{variable}} 解析与作用域合并
-├── main_test.go                 # ui.NewTester 视图测试（区域尺寸、外观循环、面板与标签）
-├── collections_test.go          # 磁盘布局、集合/环境/历史存储与变量替换
-├── shot_test.go                 # APIGO_SHOTS=<dir> 时离屏渲染 PNG（布局核验/CI 产物）
-├── internal/design/             # 设计令牌：色值、尺寸、字号、方法/状态配色、强调色与主题
-├── internal/icons/              # 自绘 SVG 图标（currentColor，24×24）
-├── docs/
-│   ├── design-baseline.md       # 还原基线：尺寸/色值真相源与已知差异
-│   ├── baseline/                # 目标截图基线（待补充）
-│   └── shots/                   # 当前界面的离屏截图（docs/shots）
-├── LICENSE                      # MIT 协议
-├── mygo.json                    # 应用元信息与构建输出目录
-├── go.mod                       # 模块 apigo；Go 1.27.2；pin mygo v0.6.0 作为 tool
-├── Taskfile.yml                 # 任务入口：dev / build / package:* / check / sync:version
-├── tools/syncversion/           # 把 APP_VERSION 写进 mygo.json（task sync:version 调用）
+├── main.go                          # 入口，只有 app.Run()
+├── internal/
+│   ├── app/                         # 界面与动作（MyGo native UI）
+│   │   ├── run.go                   #   窗口创建、数据目录与设置装载、MyGo 接线（App.Run）
+│   │   ├── app.go                   #   应用状态：集合工作区、外观、发送/应用响应、请求体格式
+│   │   ├── app_tree.go              #   树的动作：保存、移动、删除接口与文件夹，标签的跟随与关闭
+│   │   ├── app_watch.go             #   目录监听：跟随外部对集合文件的改动
+│   │   ├── store_alias.go           #   集合模型的类型别名（collection/folder/… 指向 internal/store）
+│   │   ├── req_alias.go             #   请求模型的类型别名（response/formPart/bodyFormat 指向 internal/req）
+│   │   ├── view.go                  #   根布局：集合标签条 / 主窗口或集合工作区 / 状态栏
+│   │   ├── view_topbar.go           #   集合标签条：主窗口、集合切换与关闭、最近关闭、设置
+│   │   ├── view_home.go             #   主窗口：集合列表、新建/打开/打开文件夹/删除、空状态引导
+│   │   ├── view_requests.go         #   左侧接口面板：搜索、历史、接口树、行尾新建菜单与筛选
+│   │   ├── view_menu.go             #   自绘 popover 菜单（图标 + 文本，删除项警示色）
+│   │   ├── view_confirm.go          #   确认弹窗（顶部居中，危险动作按钮用 Danger 色）
+│   │   ├── view_picker.go           #   文件夹选择弹窗：保存接口与移动接口/文件夹共用
+│   │   ├── view_tabs.go             #   请求标签页：新建、切换、关闭、右键菜单、环境选择器
+│   │   ├── view_kind.go             #   接口类型图标与类型菜单
+│   │   ├── view_env.go              #   环境弹窗与设置弹窗（通用/主题/数据三段）
+│   │   ├── view_request.go          #   请求行、请求子标签与面板
+│   │   ├── view_response.go         #   响应 meta 栏与空状态
+│   │   ├── view_start.go            #   开始提示面板（集合刚打开、没有标签时）
+│   │   ├── view_footer.go           #   状态栏（集合名、接口类型、版本）
+│   │   └── *_test.go                #   ui.NewTester 视图测试 + APIGO_SHOTS 截图（shot_test.go）
+│   ├── store/                       # 持久化：集合即目录，接口即 <名字>.yaml
+│   │   ├── service_store.go         #   数据目录布局：collections/ 的读写、集合索引、路径
+│   │   ├── service_collection.go    #   集合的新建/重命名（连目录）
+│   │   ├── service_hidden.go        #   删除集合是伪删除：记进 hidden.yaml，目录留在原处
+│   │   ├── service_tree.go          #   接口树与磁盘映射：目录=文件夹、<接口名>.yaml=接口
+│   │   ├── service_move.go          #   接口/文件夹的移动（文件或目录跟着搬）与真实删除
+│   │   ├── service_reload.go        #   整份重读集合、清理 .tmp 残留
+│   │   ├── service_static.go        #   上传文件：复制进 static/<日期>/<sha256>，按字段删除
+│   │   ├── service_env.go           #   环境：每个环境一个 .env/<环境>.yaml
+│   │   ├── service_history.go       #   请求历史（一个文件，最多 200 条）
+│   │   ├── service_settings.go      #   设置的持久化：外观、强调色、语言（settings.yaml）
+│   │   ├── service_location.go      #   数据目录的选择：location.yaml 指向用户换过的目录
+│   │   ├── service_yaml.go          #   YAML 读写、文件名净化、id 编号
+│   │   ├── service_kind.go          #   六种接口类型与它们的显示名
+│   │   ├── vars.go                  #   store.VarsFor：活动环境变量的作用域合并
+│   │   └── collections_test.go      #   磁盘布局、集合/环境/历史存储与变量合并
+│   ├── req/                         # 请求执行与变量解析
+│   │   ├── http.go                  #   组请求（URL/参数/头/体）与发送（超时、10 MB 上限）
+│   │   ├── formats.go               #   九种请求体格式（Key/Label/MIME/编辑方式）
+│   │   ├── vars.go                  #   {{variable}} 解析
+│   │   ├── http_test.go             #   各格式的 Content-Type 与 payload、上传
+│   │   └── vars_test.go             #   变量解析与缺失报告
+│   ├── widgets/                     # 自绘控件：键值列表（kvlist.go）
+│   ├── assets/                      # 内嵌界面字体（HarmonyOS Sans SC + go:embed + 注册）
+│   ├── design/                      # 设计令牌：色值、尺寸、字号、方法/状态配色、强调色与主题
+│   └── icons/                       # 自绘 SVG 图标（currentColor，24×24）
 ├── resources/
-│   ├── icon.png                 # 应用图标（默认读取该路径）
-│   └── HarmonyOS_Sans_SC.ttf    # 界面字体，经 font.go 的 go:embed 打进可执行文件
+│   └── icon.png                     # 应用图标（mygo 默认读取该路径）
+├── docs/
+│   ├── design-baseline.md           # 还原基线：尺寸/色值真相源与已知差异
+│   ├── baseline/                    # 目标截图基线（待补充）
+│   └── shots/                       # 当前界面的离屏截图（docs/shots）
+├── tools/syncversion/               # 把 APP_VERSION 写进 mygo.json（task sync:version 调用）
 ├── .github/workflows/
-│   ├── check.yml                # CI：静态检查 + 测试 + 竞态 + Windows 打包冒烟
-│   └── release.yml              # tag 触发的三平台打包与 Release
+│   ├── check.yml                    # CI：静态检查 + 测试 + 竞态 + Windows 打包冒烟
+│   └── release.yml                  # tag 触发的三平台打包与 Release
+├── LICENSE                          # MIT 协议
+├── mygo.json                        # 应用元信息与构建输出目录
+├── go.mod                           # 模块 apigo；Go 1.27.2；pin mygo v0.6.0 作为 tool
+├── Taskfile.yml                     # 任务入口：dev / build / package:* / check / sync:version
 └── .agents/
     ├── skills/mygo-maintenance/ # MyGo 官方维护技能（生命周期/身份/线程/测试）
     ├── readme/SKILL.md          # README 写作规范
