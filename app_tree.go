@@ -3,7 +3,6 @@ package main
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -51,7 +50,6 @@ func (a *app) askNewFolder(folderPath string) {
 			if err != nil {
 				return err
 			}
-			a.markStale()
 			c.Toast("已新建文件夹「" + name + "」")
 			return nil
 		},
@@ -76,7 +74,6 @@ func (a *app) saveCurrent(c *ui.Context) {
 		return
 	}
 	t.markSaved()
-	a.markStale()
 	c.Toast("已保存「" + t.title + "」")
 }
 
@@ -98,7 +95,6 @@ func (a *app) askWhereToSave(t *tab) {
 			}
 			t.collectionID, t.title, t.path, t.folder = col, req.Name, req.Path, folder
 			t.markSaved()
-			a.markStale()
 			c.Toast("已保存「" + req.Name + "」到「" + pathName(folder) + "」")
 			return nil
 		},
@@ -118,7 +114,6 @@ func (a *app) askToMoveRequest(requestPath string) {
 				return err
 			}
 			a.retargetTabs(requestPath, req.Path)
-			a.markStale()
 			c.Toast("已移动到「" + pathName(folder) + "」")
 			return nil
 		},
@@ -138,7 +133,6 @@ func (a *app) askToMoveFolder(folderPath string) {
 				return err
 			}
 			a.retargetTabs(folderPath, moved.Path)
-			a.markStale()
 			c.Toast("已移动到「" + pathName(folder) + "」")
 			return nil
 		},
@@ -169,7 +163,6 @@ func (a *app) askToDeleteRequest(requestPath string) {
 				return
 			}
 			a.forgetTabsUnder(requestPath)
-			a.markStale()
 			c.Toast("已删除「" + name + "」")
 		},
 	})
@@ -195,7 +188,6 @@ func (a *app) askToDeleteFolder(folderPath string) {
 				return
 			}
 			a.forgetTabsUnder(folderPath)
-			a.markStale()
 			c.Toast("已删除「" + name + "」")
 		},
 	})
@@ -269,16 +261,6 @@ func (a *app) tabOfPath(ws *workspace, treePath string) int {
 	return -1
 }
 
-// markStale writes the open collection's signature down after the app itself
-// changed its files, so the watch does not read them again for nothing.
-func (a *app) markStale() {
-	if a.active == "" {
-		return
-	}
-	a.signature = a.store.treeSignature(a.active)
-	a.scanned = time.Now()
-}
-
 // askRenameRequest asks for the new name of an interface, keeping it in the
 // folder it is in.
 func (a *app) askRenameRequest(requestPath string) {
@@ -295,7 +277,6 @@ func (a *app) askRenameRequest(requestPath string) {
 				return err
 			}
 			a.retargetTabs(requestPath, req.Path)
-			a.markStale()
 			c.Toast("已重命名为「" + req.Name + "」")
 			return nil
 		},
@@ -319,7 +300,6 @@ func (a *app) askRenameFolder(folderPath string) {
 				return err
 			}
 			a.retargetTabs(folderPath, moved.Path)
-			a.markStale()
 			c.Toast("已重命名为「" + moved.Name + "」")
 			return nil
 		},
@@ -335,6 +315,5 @@ func (a *app) duplicateRequest(c *ui.Context, requestPath string) {
 		c.Toast("复制失败：" + err.Error())
 		return
 	}
-	a.markStale()
 	c.Toast("已复制为「" + copied.Name + "」")
 }

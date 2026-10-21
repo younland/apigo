@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // reloadCollection reads a collection again from its directory: its tree of
@@ -32,36 +30,6 @@ func (s *store) reloadCollection(collectionID string) error {
 	s.collections[s.collectionIndex(collectionID)] = col
 	s.sortCollections()
 	return nil
-}
-
-// treeSignature is what a collection's files say: their names, sizes and
-// modification times. Comparing it finds a change another program made, which
-// a folder watcher would report where the platform has one.
-func (s *store) treeSignature(collectionID string) string {
-	var b strings.Builder
-	root := s.collectionDir(collectionID)
-	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if entry.IsDir() {
-			if path != root && isReservedDir(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
-		}
-		fmt.Fprintf(&b, "%s|%d|%d\n", filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano())
-		return nil
-	})
-	return b.String()
 }
 
 // treeHasRequest reports whether an interface is still in the tree.

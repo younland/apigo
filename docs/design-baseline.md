@@ -147,7 +147,7 @@
 | GraphQL 用 JSON 高亮 | MyGo 0.6.0 的编辑器语法表里没有 GraphQL | 用 JSON 语言渲染 GraphQL 文档（`{"query":…,"variables":…}`），发送前按 JSON 校验、Content-Type 为 `application/json` |
 | 选「跟随系统」后无法再随桌面变化 | `SetTheme` 之后无法交还给系统主题（MyGo 没有 reset） | 启动时取桌面亮暗并下发我们自己的主题（控件与自绘配色一致），会话内固定；重启恢复跟随 |
 | 响应体整篇跨行选中受限 | 虚拟化列表只含可见行 | Raw 视图用只读编辑器（自带查找与选中） |
-| 集合文件变化靠轮询发现 | `mygo.WatchFiles`（0.5.5 起就有）本可递归监听目录，当前实现选择了轮询，尚未换成监听 | 打开集合时整份重读一次（`reloadCollection`）；此后每 1.5 秒比对一次「文件名 + 大小 + 修改时间」的签名（`treeSignature`），变了才重读，`c.After` 维持这次重绘；重读后树表随磁盘更新，接口没了的标签退回草稿 |
+| 集合文件变化由目录监听驱动 | `mygo.WatchFiles` 要求 app 已启动，`ui.Tester` 里调不了；监听 goroutine 也不能直接改应用状态 | 监听走可替换的 `a.watch`（生产是 `watchFiles` → `mygo.WatchFiles`，测试是假监听）：`followFiles` 每帧比对外层集合决定开/停，`Recursive` + `Debounce 150ms` + 忽略 `.env`/`static`/点开头目录；事件在监听 goroutine 上收，`reloadActive()` 交回窗口线程执行（`a.after`）；打开集合时仍整份重读一次 |
 | 原子写入的临时文件放在 `.tmp` | 原地写 `xxx.yaml.tmp` 会在接口目录里留下半截文件 | `writeYAML` 与上传复制都先写到所属集合根目录的 `.tmp/`，再 rename 到位；读取跳过点开头的目录，崩溃残留的临时文件在打开集合时清掉（`removeTempFiles`） |
 
 ## 7. 更新流程

@@ -167,7 +167,6 @@ func (a *app) commitTabRename(c *ui.Context, t *tab) {
 	t.title = req.Name
 	a.retargetTabs(old, req.Path)
 	t.markSaved()
-	a.markStale()
 }
 
 // cancelRename puts the title back as it was.
@@ -263,10 +262,10 @@ type app struct {
 	saveErr        string           // the interface write that failed, shown once
 	languageOpen   bool             // the language menu of the settings
 
-	// signature is what the open collection's files said when they were last
-	// read, and scanned when they were last looked at.
-	signature string
-	scanned   time.Time
+	// watched is the collection whose directory a watch follows, and
+	// watchStop ends that watch.
+	watched   string
+	watchStop func()
 
 	store *store
 
@@ -287,6 +286,10 @@ type app struct {
 	// chooseFile asks the desktop for a file to upload. main fills it with the
 	// file dialog; tests replace it.
 	chooseFile func() (string, error)
+
+	// watch follows a collection's directory for the changes another program
+	// makes in it. main fills it with mygo's watch; tests replace it.
+	watch watchStarter
 }
 
 func newApp() *app {
@@ -353,8 +356,6 @@ func (a *app) reloadActive() {
 		return
 	}
 	a.store.removeTempFiles(a.active)
-	a.signature = a.store.treeSignature(a.active)
-	a.scanned = time.Now()
 	col := a.store.collection(a.active)
 	if col == nil {
 		return
@@ -363,27 +364,6 @@ func (a *app) reloadActive() {
 		if t.path != "" && !treeHasRequest(col.Root, t.path) {
 			t.path = "" // the file went away: the tab is a draft again
 		}
-	}
-}
-
-// fileScanEvery is how often the app looks for changes another program made to
-// the open collection: watching a folder needs a platform API MyGo does not
-// bring, so the tree is compared instead.
-const fileScanEvery = 1500 * time.Millisecond
-
-// scanFiles reads the open collection again when its files changed, so the
-// tree follows a rename, a new interface or a deleted one made outside the app.
-func (a *app) scanFiles(c *ui.Context) {
-	if a.active == "" {
-		return
-	}
-	c.After(fileScanEvery) // a frame that keeps the watch going
-	if time.Since(a.scanned) < fileScanEvery {
-		return
-	}
-	a.scanned = time.Now()
-	if sig := a.store.treeSignature(a.active); sig != a.signature {
-		a.reloadActive()
 	}
 }
 
@@ -456,7 +436,6 @@ func (a *app) saveTab(t *tab) {
 		return
 	}
 	t.markSaved()
-	a.markStale()
 }
 
 // addTab opens an empty request after the active one.

@@ -38,6 +38,9 @@ func main() {
 		a.opener = mygo.Shell.OpenPath
 		a.chooseDir = chooseDirectory
 		a.chooseFile = chooseUpload
+		// The tree follows the files another program changes in the open
+		// collection's directory.
+		a.watch = watchFiles
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

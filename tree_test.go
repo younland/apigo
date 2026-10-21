@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -572,29 +571,6 @@ func TestRenameTabRenamesTheFile(t *testing.T) {
 	}
 	if _, ok := tt.Find("请求 宠物"); !ok {
 		t.Errorf("texts %q, want the tree row named as renamed", tt.Texts())
-	}
-}
-
-// TestScanFindsFilesChangedOutside checks the tree follows a file another
-// program writes into the open collection.
-func TestScanFindsFilesChangedOutside(t *testing.T) {
-	a := treeApp(t)
-	tt := ui.NewTester(a.view, 1280, 800)
-	if tt.HasText("请求 新接口") {
-		t.Fatal("the tree lists an interface that is not there yet")
-	}
-
-	// Another program writes an interface beside the ones the app knows.
-	if err := writeYAML(a.store.folderDir(a.active, "")+"/新接口.yaml", savedRequest{
-		Kind: kindREST, Method: "GET",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a.scanned = time.Time{} // the next frame looks
-	tt.Frame()
-
-	if !tt.HasText("请求 新接口") {
-		t.Errorf("texts %q, want the interface another program wrote", tt.Texts())
 	}
 }
 

@@ -17,9 +17,9 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.saveErr)
 		a.saveErr = ""
 	}
-	// The tree follows the files another program changes, which asks for a
-	// frame now and then to look.
-	a.scanFiles(c)
+	// The tree follows the files another program changes in the open
+	// collection's directory.
+	a.followFiles()
 
 	ui.Column(c).Fill().Background(p.Background).Children(func() {
 		a.topBar(c, p)
