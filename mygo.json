@@ -2,5 +2,8 @@
   "name": "apigo",
   "identifier": "com.example.apigo",
   "version": "0.1.0",
-  "out": "build"
+  "out": "build",
+  "linux": {
+    "webview": false
+  }
 }
