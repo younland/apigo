@@ -294,3 +294,77 @@ func (s *store) otherEnvironmentNames(self *environment) []string {
 	}
 	return names
 }
+
+// cloneEnvironments copies the environments as they stand: what a dialog that
+// is cancelled puts back.
+func (s *store) cloneEnvironments() []environment {
+	out := make([]environment, len(s.environments))
+	for i, env := range s.environments {
+		out[i] = env
+		out[i].Vars = append([]savedRow(nil), env.Vars...)
+	}
+	return out
+}
+
+// restoreEnvironments puts a copy back, undoing what a dialog changed.
+func (s *store) restoreEnvironments(kept []environment) { s.environments = kept }
+
+// selectEnvironment makes one environment the active one of its scope without
+// writing it: the environment manager keeps the change until it is saved.
+func (s *store) selectEnvironment(id string) error {
+	env := s.environment(id)
+	if env == nil {
+		return fmt.Errorf("no environment %q", id)
+	}
+	for i := range s.environments {
+		if s.environments[i].Scope == env.Scope {
+			s.environments[i].Active = s.environments[i].ID == id
+		}
+	}
+	return nil
+}
+
+// nameEnvironment gives an environment a new name without writing it, and
+// returns the name it ended up with.
+func (s *store) nameEnvironment(id, name string) string {
+	env := s.environment(id)
+	if env == nil {
+		return ""
+	}
+	if strings.TrimSpace(name) == "" {
+		return env.Name
+	}
+	env.Name = uniqueName(s.otherEnvironmentNames(env), name)
+	return env.Name
+}
+
+// newEnvironment makes an environment with an empty BaseURL without writing
+// it, as the manager adds one until it is saved.
+func (s *store) newEnvironment(collectionID, name string) environment {
+	env := environment{
+		ID: s.newEnvironmentID(), Name: s.uniqueEnvironmentName(collectionID, name),
+		Scope: collectionID, Vars: []savedRow{{Enabled: true, Key: "BaseURL"}},
+	}
+	s.environments = append(s.environments, env)
+	return env
+}
+
+// forgetEnvironment takes an environment out of memory without writing it.
+func (s *store) forgetEnvironment(id string) {
+	for i, env := range s.environments {
+		if env.ID != id {
+			continue
+		}
+		scope := env.Scope
+		s.environments = append(s.environments[:i], s.environments[i+1:]...)
+		if s.activeEnvironment(scope) == nil {
+			for j := range s.environments {
+				if s.environments[j].Scope == scope {
+					s.environments[j].Active = true
+					break
+				}
+			}
+		}
+		return
+	}
+}

@@ -25,5 +25,34 @@ func (m Mode) String() string {
 	}
 }
 
+// Key names the mode as the settings file keeps it.
+func (m Mode) Key() string {
+	switch m {
+	case Light:
+		return "light"
+	case Dark:
+		return "dark"
+	case Black:
+		return "black"
+	default:
+		return "system"
+	}
+}
+
+// ParseMode reads the name a settings file keeps; anything else follows the
+// desktop.
+func ParseMode(key string) Mode {
+	switch key {
+	case "light":
+		return Light
+	case "dark":
+		return Dark
+	case "black":
+		return Black
+	default:
+		return System
+	}
+}
+
 // Next returns the mode the appearance button cycles to.
 func (m Mode) Next() Mode { return (m + 1) % 4 }

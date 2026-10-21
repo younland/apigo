@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -195,8 +196,9 @@ func parentPath(treePath string) string {
 	return ""
 }
 
-// addFolder creates a folder in a collection's tree and its directory,
-// naming it after the folder.
+// addFolder creates a folder in a collection's tree and its directory, naming
+// it after the folder. A level of the tree holds one folder of a name, so a
+// name already there is refused rather than numbered.
 func (s *store) addFolder(collectionID, folderPath, name string) (folder, error) {
 	col := s.collection(collectionID)
 	if col == nil {
@@ -206,8 +208,16 @@ func (s *store) addFolder(collectionID, folderPath, name string) (folder, error)
 	if parent == nil {
 		return folder{}, fmt.Errorf("没有文件夹 %q", folderPath)
 	}
-	created := folder{Name: uniqueName(folderNames(*parent), name)}
-	created.Path = joinPath(parent.Path, created.Name)
+	want := safeFileName(name)
+	if want == "" {
+		return folder{}, errors.New("文件夹名称不能为空")
+	}
+	for _, have := range folderNames(*parent) {
+		if have == want {
+			return folder{}, fmt.Errorf("同级目录里已有文件夹「%s」", want)
+		}
+	}
+	created := folder{Name: want, Path: joinPath(parent.Path, want)}
 	parent.Folders = append(parent.Folders, created)
 	return created, s.saveCollection(*col)
 }

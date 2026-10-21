@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,9 @@ import (
 // the active one.
 var errNoCollection = errors.New("没有激活的集合")
 
+// errNoOpener is what showing a folder reports where no desktop can show it.
+var errNoOpener = errors.New("当前环境不能打开文件夹")
+
 // workspace is what a collection keeps open: its request tabs and the tab
 // being edited.
 type workspace struct {
@@ -27,7 +31,16 @@ type workspace struct {
 	active int
 }
 
-func newWorkspace() *workspace { return &workspace{tabs: []*tab{newTab()}} }
+// newWorkspace is the workspace a collection opens with: no request tabs at
+// all, so the workspace shows what to do rather than an empty request. A tab
+// opens when an interface is opened or a new one is started.
+func newWorkspace() *workspace {
+	return &workspace{}
+}
+
+// empty reports whether the workspace shows no request: the workspace pane
+// says what to do in its place.
+func (ws *workspace) empty() bool { return len(ws.tabs) == 0 }
 
 // panelMode is what the requests panel lists.
 type panelMode int
@@ -37,8 +50,49 @@ const (
 	panelHistory
 )
 
-// bodyTypes are the request body formats the Body tab offers.
-var bodyTypes = []string{"none", "json", "text"}
+// bodyFormat is one of the formats the Body tab offers: the key an interface
+// file keeps, the name the strip shows, and the Content-Type a request sends
+// with it.
+type bodyFormat struct {
+	key   string
+	label string
+	mime  string
+	edits bodyEdits
+}
+
+// bodyEdits is how the pane edits a format.
+type bodyEdits int
+
+const (
+	editsNone bodyEdits = iota // nothing to send
+	editsRows                  // key/value rows, sent encoded
+	editsText                  // the code editor's text
+	editsFile                  // a file the app does not pick yet
+)
+
+// bodyFormats are the formats of the Body tab, in the order it shows them.
+var bodyFormats = []bodyFormat{
+	{"none", "none", "", editsNone},
+	{"form-data", "form-data", "multipart/form-data", editsRows},
+	{"urlencoded", "x-www-form-urlencoded", "application/x-www-form-urlencoded", editsRows},
+	{"json", "JSON", "application/json", editsText},
+	{"xml", "XML", "application/xml", editsText},
+	{"text", "Text", "text/plain", editsText},
+	{"binary", "Binary", "application/octet-stream", editsFile},
+	{"graphql", "GraphQL", "application/json", editsText},
+	{"msgpack", "msgpack", "application/msgpack", editsFile},
+}
+
+// bodyFormatOf returns the format a key names, the default for one it does not
+// know.
+func bodyFormatOf(key string) bodyFormat {
+	for _, format := range bodyFormats {
+		if format.key == key {
+			return format
+		}
+	}
+	return bodyFormats[3]
+}
 
 // tab is one request of the tab strip: its own method, URL, parameters,
 // headers, body and response, as Hoppscotch keeps one document per tab.
@@ -46,6 +100,7 @@ type tab struct {
 	kind         kind
 	collectionID string // the collection the request came from, if any
 	path         string // the interface file it came from, "" when it has none
+	folder       string // where a request that has no file yet is saved
 	method       string
 	url          string
 	title        string
@@ -53,6 +108,7 @@ type tab struct {
 
 	params   widgets.State
 	headers  widgets.State
+	form     widgets.State // the rows of form-data and x-www-form-urlencoded
 	bodyType string
 	body     *editor.Buffer
 	bodyEdit editor.State
@@ -61,6 +117,7 @@ type tab struct {
 	resp     *response
 	respEdit editor.State
 
+	saved     string // the request as it was written, for unsaved
 	dirty     bool
 	renaming  bool
 	renameOld string
@@ -93,28 +150,71 @@ func (t *tab) commitRename() {
 	t.dirty = true
 }
 
+// commitTabRename keeps the edited title and renames the interface file the tab
+// came from with it, so the tree, the strip and the disk say the same name. A
+// tab that has no file yet keeps its title until it is saved.
+func (a *app) commitTabRename(c *ui.Context, t *tab) {
+	t.commitRename()
+	if t.path == "" || t.collectionID == "" {
+		return
+	}
+	old := t.path
+	req, err := a.store.renameRequest(t.collectionID, old, t.title)
+	if err != nil {
+		c.Toast("重命名失败：" + err.Error())
+		return
+	}
+	t.title = req.Name
+	a.retargetTabs(old, req.Path)
+	t.markSaved()
+	a.markStale()
+}
+
 // cancelRename puts the title back as it was.
 func (t *tab) cancelRename() {
 	t.title, t.renaming = t.renameOld, false
 }
 
-// hasContent reports whether the tab holds a request: a URL, a body, or
-// key/value rows that would be sent.
-func (t *tab) hasContent() bool {
-	return strings.TrimSpace(t.url) != "" || t.body.Len() > 0 ||
-		len(t.params.Enabled()) > 0 || len(t.headers.Enabled()) > 0
+// snapshot is what a tab holds, as one string: saving writes it, and a tab
+// whose request reads differently is unsaved.
+func (t *tab) snapshot() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\x00%s\x00%s\x00%s\x00%s\x00", t.kind, t.method, t.url, t.title, t.bodyType)
+	for _, list := range [][]widgets.Row{t.params.Rows, t.headers.Rows, t.form.Rows} {
+		for _, r := range list {
+			fmt.Fprintf(&b, "%v|%s|%s|%s|%s\x00", r.Enabled, r.Key, r.Value, r.File, r.FileName)
+		}
+		b.WriteString("\x01")
+	}
+	b.WriteString(t.body.String())
+	return b.String()
 }
 
-// marked reports whether the strip marks the tab with the edit dot.
-func (t *tab) marked() bool { return t.dirty || t.hasContent() }
+// markSaved remembers the request as it stands: what it holds is on disk now.
+func (t *tab) markSaved() {
+	t.saved, t.dirty = t.snapshot(), false
+}
 
-// setBodyLanguage highlights the body buffer as the selected type reads it.
+// unsaved reports whether the tab holds a request that is not on disk: one
+// that has no file of its own yet, or one that changed since it was written.
+func (t *tab) unsaved() bool {
+	return t.path == "" || t.snapshot() != t.saved
+}
+
+// setBodyLanguage highlights the body buffer as the selected type reads it,
+// and says how that type's body is written.
 func (t *tab) setBodyLanguage() {
-	name := "body.txt"
-	if t.bodyType == "json" {
-		name = "body.json"
+	name, placeholder := "body.txt", "任意文本"
+	switch t.bodyType {
+	case "json":
+		name, placeholder = "body.json", "{\n  \"key\": \"value\"\n}"
+	case "xml":
+		name, placeholder = "body.xml", "<note>\n  <to>you</to>\n</note>"
+	case "graphql":
+		name, placeholder = "body.json", "{\n  \"query\": \"{ pets { id } }\",\n  \"variables\": {}\n}"
 	}
 	t.body.SetLanguage(editor.LanguageFor(name))
+	t.bodyEdit.Placeholder = placeholder
 }
 
 // app is the state the window shows: the home window or the open
@@ -122,10 +222,13 @@ func (t *tab) setBodyLanguage() {
 // appearance. The view rebuilds from it every frame, so it holds data only,
 // never elements.
 type app struct {
-	mode       design.Mode
-	applied    design.Mode // the appearance last handed to the window
-	systemDark bool
-	theme      *ui.Theme
+	mode        design.Mode
+	applied     design.Mode // the appearance last handed to the window
+	systemDark  bool
+	theme       *ui.Theme
+	themeAccent string // the accent the theme was built with
+	accent      string // the accent choice, "" for the default
+	language    string // the interface language Picked in the settings
 
 	spaces map[string]*workspace
 	open   []string // the open collections, in tab order
@@ -140,6 +243,9 @@ type app struct {
 	envID        string
 	envName      string
 	envVars      widgets.State
+	// envEdits is how the environments stood when the manager opened: what a
+	// cancel puts back.
+	envEdits     []environment
 	percent      float32 // share of the room the request pane takes
 	methodOpen   bool
 	filterOpen   bool
@@ -147,26 +253,51 @@ type app struct {
 	moreOpen     bool
 	envMenuOpen  bool
 
-	collectionOpen bool // the new-collection dialog
+	collectionOpen bool   // the new-collection dialog
+	collectionEdit string // the collection the dialog renames, "" for a new one
 	collectionName string
+	question       confirm          // the question a dialog asks before an action
+	where          folderQuestion   // the folder a dialog asks for
 	foldersClosed  map[string]bool  // folders the tree shows collapsed
-	folderMenus    map[string]*bool // the add menus open per folder
+	menus          map[string]*bool // the popover menus open, by their key
 	saveErr        string           // the interface write that failed, shown once
+	languageOpen   bool             // the language menu of the settings
+
+	// signature is what the open collection's files said when they were last
+	// read, and scanned when they were last looked at.
+	signature string
+	scanned   time.Time
 
 	store *store
 
 	// after schedules work on the window's thread. Tests leave it nil, and
 	// the work then runs inline.
 	after func(func())
+
+	// opener shows a directory in the desktop's file manager. main fills it
+	// with mygo.Shell.OpenPath; tests replace it.
+	opener func(string) error
+
+	// baseDir is the default data directory, where the pointer to the one the
+	// user picked is kept; main fills it, and chooseDir asks the desktop for
+	// another one.
+	baseDir   string
+	chooseDir func() (string, error)
+
+	// chooseFile asks the desktop for a file to upload. main fills it with the
+	// file dialog; tests replace it.
+	chooseFile func() (string, error)
 }
 
 func newApp() *app {
 	return &app{
-		mode:    design.System,
-		applied: design.Mode(-1),
-		percent: 55,
-		spaces:  map[string]*workspace{},
-		store:   newStore(""),
+		mode:     design.System,
+		applied:  design.Mode(-1),
+		accent:   design.DefaultAccent.Name,
+		language: languages[0],
+		percent:  55,
+		spaces:   map[string]*workspace{},
+		store:    newStore(""),
 	}
 }
 
@@ -205,6 +336,55 @@ func (a *app) openCollection(id string) {
 	}
 	a.closed = removeString(a.closed, id)
 	a.active = id
+	// Opening a collection reads its files again: another program may have
+	// changed them since it was last listed.
+	a.reloadActive()
+}
+
+// reloadActive reads the open collection's files again, keeping the tabs that
+// are open on them: an interface that went away leaves its tab a draft, so
+// saving it again makes a new file rather than failing on a missing one.
+func (a *app) reloadActive() {
+	if a.active == "" {
+		return
+	}
+	if err := a.store.reloadCollection(a.active); err != nil {
+		a.saveErr = "读取集合失败：" + err.Error()
+		return
+	}
+	a.store.removeTempFiles(a.active)
+	a.signature = a.store.treeSignature(a.active)
+	a.scanned = time.Now()
+	col := a.store.collection(a.active)
+	if col == nil {
+		return
+	}
+	for _, t := range a.space().tabs {
+		if t.path != "" && !treeHasRequest(col.Root, t.path) {
+			t.path = "" // the file went away: the tab is a draft again
+		}
+	}
+}
+
+// fileScanEvery is how often the app looks for changes another program made to
+// the open collection: watching a folder needs a platform API MyGo does not
+// bring, so the tree is compared instead.
+const fileScanEvery = 1500 * time.Millisecond
+
+// scanFiles reads the open collection again when its files changed, so the
+// tree follows a rename, a new interface or a deleted one made outside the app.
+func (a *app) scanFiles(c *ui.Context) {
+	if a.active == "" {
+		return
+	}
+	c.After(fileScanEvery) // a frame that keeps the watch going
+	if time.Since(a.scanned) < fileScanEvery {
+		return
+	}
+	a.scanned = time.Now()
+	if sig := a.store.treeSignature(a.active); sig != a.signature {
+		a.reloadActive()
+	}
 }
 
 // closeCollection closes a collection's workspace, writing its tabs back
@@ -214,6 +394,7 @@ func (a *app) closeCollection(id string) {
 	if ws := a.spaces[id]; ws != nil {
 		for _, t := range ws.tabs {
 			a.saveTab(t)
+			a.dropTabMenu(t)
 		}
 	}
 	a.forgetCollection(id)
@@ -272,16 +453,29 @@ func (a *app) saveTab(t *tab) {
 	}
 	if err := a.store.updateRequest(t.collectionID, t.path, savedFromTab(t)); err != nil {
 		a.saveErr = "接口保存失败：" + err.Error()
+		return
 	}
+	t.markSaved()
+	a.markStale()
 }
 
 // addTab opens an empty request after the active one.
 func (a *app) addTab(ws *workspace) {
+	a.openTab(ws, newTab(), ws.active+1)
+}
+
+// openTab puts t at position i of the workspace and shows it, writing back the
+// tab it leaves when that is another one. An empty workspace takes the tab at
+// its only place, whatever i asked for.
+func (a *app) openTab(ws *workspace, t *tab, i int) {
 	a.leaveTab(ws)
+	if i > len(ws.tabs) {
+		i = len(ws.tabs)
+	}
 	ws.tabs = append(ws.tabs, nil)
-	copy(ws.tabs[ws.active+2:], ws.tabs[ws.active+1:])
-	ws.tabs[ws.active+1] = newTab()
-	ws.active++
+	copy(ws.tabs[i+1:], ws.tabs[i:])
+	ws.tabs[i] = t
+	ws.active = i
 }
 
 // duplicateTab opens a copy of the tab at i after it, as a new request that
@@ -294,32 +488,29 @@ func (a *app) duplicateTab(ws *workspace, i int) {
 	dup.bodyType = src.bodyType
 	dup.params.Rows = append([]widgets.Row(nil), src.params.Rows...)
 	dup.headers.Rows = append([]widgets.Row(nil), src.headers.Rows...)
+	dup.form.Rows = append([]widgets.Row(nil), src.form.Rows...)
 	dup.body.Set(src.body.String())
 
-	a.leaveTab(ws)
-	ws.tabs = append(ws.tabs, nil)
-	copy(ws.tabs[i+2:], ws.tabs[i+1:])
-	ws.tabs[i+1] = dup
-	ws.active = i + 1
+	a.openTab(ws, dup, i+1)
 }
 
-// closeTab closes the tab at i, keeping one empty tab when it was the last.
+// closeTab closes the tab at i. Closing the last one leaves the workspace
+// with no tab at all, so the pane says what to do again.
 func (a *app) closeTab(ws *workspace, i int) {
 	if i < 0 || i >= len(ws.tabs) {
 		return
 	}
 	a.saveTab(ws.tabs[i])
-	if len(ws.tabs) == 1 {
-		ws.tabs[0] = newTab()
-		ws.active = 0
-		return
-	}
+	a.dropTabMenu(ws.tabs[i])
 	ws.tabs = append(ws.tabs[:i], ws.tabs[i+1:]...)
 	if i < ws.active {
 		ws.active--
 	}
 	if ws.active >= len(ws.tabs) {
 		ws.active = len(ws.tabs) - 1
+	}
+	if ws.empty() {
+		ws.active = 0
 	}
 }
 
@@ -331,11 +522,36 @@ func (a *app) closeOtherTabs(ws *workspace, i int) {
 	for j, t := range ws.tabs {
 		if j != i {
 			a.saveTab(t)
+			a.dropTabMenu(t)
 		}
 	}
 	ws.tabs = []*tab{ws.tabs[i]}
 	ws.active = 0
 }
+
+// closeTabAt closes the tab a pointer names, wherever it sits now.
+func (a *app) closeTabAt(ws *workspace, t *tab) {
+	if i := a.tabIndex(ws, t); i >= 0 {
+		a.closeTab(ws, i)
+	}
+}
+
+// closeTabsExcept closes every tab but the one a pointer names.
+func (a *app) closeTabsExcept(ws *workspace, t *tab) {
+	if i := a.tabIndex(ws, t); i >= 0 {
+		a.closeOtherTabs(ws, i)
+	}
+}
+
+// duplicateTabAt opens a copy of the tab a pointer names, after it.
+func (a *app) duplicateTabAt(ws *workspace, t *tab) {
+	if i := a.tabIndex(ws, t); i >= 0 {
+		a.duplicateTab(ws, i)
+	}
+}
+
+// dropTabMenu forgets the menu of a tab that is going away.
+func (a *app) dropTabMenu(t *tab) { delete(a.menus, requestTabMenuKey(t)) }
 
 // newCollection creates a collection with its default environments and
 // opens it.
@@ -353,14 +569,158 @@ func (a *app) newCollection(name string) error {
 
 // openCollectionModal asks for the name of a new collection.
 func (a *app) openCollectionModal() {
-	a.collectionName = ""
+	a.collectionEdit, a.collectionName = "", ""
 	a.collectionOpen = true
 }
 
-// saveNewCollection creates the collection the dialog names.
+// openRenameModal asks for the new name of a collection.
+func (a *app) openRenameModal(id string) {
+	i := a.collectionIndex(id)
+	if i < 0 {
+		return
+	}
+	a.collectionEdit, a.collectionName = id, a.store.collections[i].Name
+	a.collectionOpen = true
+}
+
+// openFolder shows a directory in the desktop's file manager.
+func (a *app) openFolder(path string) error {
+	if a.opener == nil {
+		return errNoOpener
+	}
+	return a.opener(path)
+}
+
+// chooseDataDir asks the desktop for a directory and moves the app's data
+// there, keeping the choice for the next run.
+func (a *app) chooseDataDir(c *ui.Context) {
+	if a.chooseDir == nil {
+		c.Toast("当前环境不能选择目录")
+		return
+	}
+	dir, err := a.chooseDir()
+	if err != nil {
+		c.Toast("选择目录失败：" + err.Error())
+		return
+	}
+	if dir == "" {
+		return // the dialog was cancelled
+	}
+	if err := a.useDataDir(dir); err != nil {
+		c.Toast("切换数据目录失败：" + err.Error())
+		return
+	}
+	c.Toast("数据目录已切换到 " + dir)
+}
+
+// staticScope is the collection a tab's uploaded files live in: the one the
+// request came from, or the one whose workspace holds it before it is saved.
+func (a *app) staticScope(t *tab) string {
+	if t.collectionID != "" {
+		return t.collectionID
+	}
+	return a.active
+}
+
+// formParts turns the form rows into the fields a request sends, resolving the
+// file each one holds to the path the collection keeps it at.
+func (a *app) formParts(t *tab, rows []widgets.Row) []formPart {
+	scope := a.staticScope(t)
+	parts := make([]formPart, 0, len(rows))
+	for _, row := range rows {
+		part := formPart{key: row.Key, value: row.Value}
+		if row.File != "" && scope != "" {
+			part.filePath = a.store.staticPath(scope, row.File)
+			part.fileName = row.FileName
+			if part.fileName == "" {
+				part.fileName = filepath.Base(row.File)
+			}
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+// pickFormFile asks the desktop for a file and keeps it in the tab's
+// collection, under static/<day>/<hash>. It returns the path the collection
+// keeps it at and the name the file had, which the field records.
+func (a *app) pickFormFile(c *ui.Context, t *tab) (string, string, error) {
+	scope := a.staticScope(t)
+	if scope == "" {
+		c.Toast("先打开一个集合，再上传文件")
+		return "", "", nil
+	}
+	if a.chooseFile == nil {
+		c.Toast("当前环境不能选择文件")
+		return "", "", nil
+	}
+	path, err := a.chooseFile()
+	if err != nil {
+		c.Toast("选择文件失败：" + err.Error())
+		return "", "", nil
+	}
+	if path == "" {
+		return "", "", nil // the dialog was cancelled
+	}
+	rel, err := a.store.importStatic(scope, path)
+	if err != nil {
+		c.Toast("保存文件失败：" + err.Error())
+		return "", "", nil
+	}
+	return rel, filepath.Base(path), nil
+}
+
+// dropFormFile deletes a file a form field no longer holds.
+func (a *app) dropFormFile(t *tab, rel string) {
+	scope := a.staticScope(t)
+	if scope == "" {
+		return
+	}
+	if err := a.store.removeStatic(scope, rel); err != nil {
+		a.saveErr = "删除旧文件失败：" + err.Error()
+	}
+}
+
+// useDataDir reads the collections of another data directory, its
+// environments and settings, and keeps the choice for the next run.
+func (a *app) useDataDir(dir string) error {
+	next := newStore(dir)
+	if err := next.load(); err != nil {
+		return err
+	}
+	if err := rememberStoreDir(a.baseDir, dir); err != nil {
+		return err
+	}
+	a.store = next
+	a.forgetEverything()
+	a.applySettings()
+	return nil
+}
+
+// forgetEverything drops what the window held for the collections that were
+// open, as reading another data directory leaves none of them.
+func (a *app) forgetEverything() {
+	a.spaces = map[string]*workspace{}
+	a.open, a.closed, a.active = nil, nil, ""
+	a.envOpen, a.envID, a.envName = false, "", ""
+	a.foldersClosed, a.menus = nil, nil
+	a.search, a.kindFilter, a.panelMode = "", "", panelRequests
+}
+
+// saveNewCollection creates the collection the dialog names, or renames the
+// one the dialog was opened for.
 func (a *app) saveNewCollection(c *ui.Context) {
 	name := strings.TrimSpace(a.collectionName)
 	if name == "" {
+		return
+	}
+	editing := a.collectionEdit
+	if editing != "" {
+		if err := a.renameCollection(editing, name); err != nil {
+			c.Toast("重命名集合失败：" + err.Error())
+			return
+		}
+		a.collectionOpen, a.collectionName, a.collectionEdit = false, "", ""
 		return
 	}
 	if err := a.newCollection(name); err != nil {
@@ -370,23 +730,68 @@ func (a *app) saveNewCollection(c *ui.Context) {
 	a.collectionOpen, a.collectionName = false, ""
 }
 
-// deleteCollection removes a collection, closing it when it is open.
+// renameCollection renames a collection and keeps whatever is open on it
+// pointing at the new id.
+func (a *app) renameCollection(id, name string) error {
+	col, err := a.store.renameCollection(id, name)
+	if err != nil {
+		return err
+	}
+	newID := col.ID
+	if ws := a.spaces[id]; ws != nil && newID != id {
+		delete(a.spaces, id)
+		a.spaces[newID] = ws
+		for _, t := range ws.tabs {
+			if t.collectionID == id {
+				t.collectionID = newID
+			}
+		}
+	}
+	a.open = renameInList(a.open, id, newID)
+	a.closed = renameInList(a.closed, id, newID)
+	if a.active == id {
+		a.active = newID
+	}
+	return nil
+}
+
+// renameInList swaps an id for the one it was renamed to.
+func renameInList(ids []string, from, to string) []string {
+	for i, id := range ids {
+		if id == from {
+			ids[i] = to
+		}
+	}
+	return ids
+}
+
+// deleteCollection takes a collection off the list, closing it when it is open.
+// Its directory, interfaces and environments stay where they are: the next run
+// reads hidden.yaml and leaves it out again.
 func (a *app) deleteCollection(id string) error {
-	if err := a.store.deleteCollection(id); err != nil {
+	if err := a.store.hideCollection(id); err != nil {
 		return err
 	}
 	if a.active == id || containsString(a.open, id) {
-		// The collection is gone, so its workspace is dropped without writing
-		// its tabs back.
+		// The collection left the window, so its workspace is dropped without
+		// writing its tabs back.
 		a.forgetCollection(id)
 	}
 	return nil
 }
 
-// openRequest opens a saved request in a new tab of its collection.
+// openRequest opens a saved request in its collection, in the tab that already
+// shows it when there is one: a request has a single tab, and opening it again
+// brings that tab forward rather than making another.
 func (a *app) openRequest(collectionID string, r savedRequest) {
 	a.openCollection(collectionID)
 	ws := a.space()
+	if r.Path != "" {
+		if i := a.tabOfPath(ws, r.Path); i >= 0 {
+			a.selectTab(ws, i)
+			return
+		}
+	}
 	t := newTab()
 	t.kind = r.Kind
 	if t.kind == "" {
@@ -403,18 +808,16 @@ func (a *app) openRequest(collectionID string, r savedRequest) {
 	t.url = r.URL
 	t.params.Rows = rowsFromSaved(r.Params)
 	t.headers.Rows = rowsFromSaved(r.Headers)
+	t.form.Rows = rowsFromSaved(r.Form)
 	if r.BodyType != "" {
 		t.bodyType = r.BodyType
 		t.setBodyLanguage()
 	}
 	t.body.Set(r.Body)
-	t.path = r.Path
+	t.path, t.folder = r.Path, parentPath(r.Path)
+	t.markSaved()
 
-	a.leaveTab(ws)
-	ws.tabs = append(ws.tabs, nil)
-	copy(ws.tabs[ws.active+2:], ws.tabs[ws.active+1:])
-	ws.tabs[ws.active+1] = t
-	ws.active++
+	a.openTab(ws, t, ws.active+1)
 }
 
 // openHistory opens a history entry in the active collection.
@@ -427,38 +830,41 @@ func (a *app) openHistory(entry historyEntry) {
 	})
 }
 
-// addRequest adds a request of the given kind to the active collection, in
-// the folder folderPath names, and opens it.
+// addRequest opens a request of the given kind as a draft: nothing is written
+// until it is saved with Ctrl+S, which asks where in the collection it goes,
+// offering the folder the + that made it stands on.
 func (a *app) addRequest(k kind, folderPath string) error {
 	if a.active == "" {
 		return errNoCollection
 	}
-	method := "GET"
+	t := newTab()
+	t.kind, t.collectionID, t.folder = k, a.active, folderPath
 	if k != kindREST {
-		method = ""
+		t.method = ""
 	}
-	req, err := a.store.addRequest(a.active, folderPath, "Untitled", savedRequest{
-		Kind: k, Method: method, BodyType: "json",
-	})
-	if err != nil {
-		return err
-	}
-	a.openRequest(a.active, req)
+	ws := a.space()
+	a.openTab(ws, t, ws.active+1)
 	return nil
 }
 
-// newFolder adds a folder to the 根目录 of the active collection's tree.
-func (a *app) newFolder() error {
+// newFolder adds a folder inside a folder of the active collection's tree,
+// the 根目录 when folderPath is empty.
+func (a *app) newFolder(folderPath string) error {
 	col := a.store.collection(a.active)
 	if col == nil {
 		return errNoCollection
 	}
-	_, err := a.store.addFolder(a.active, "", fmt.Sprintf("分组 %d", len(col.Root.Folders)+1))
+	parent := findFolder(&col.Root, folderPath)
+	if parent == nil {
+		return fmt.Errorf("没有文件夹 %q", folderPath)
+	}
+	_, err := a.store.addFolder(a.active, folderPath,
+		fmt.Sprintf("分组 %d", len(parent.Folders)+1))
 	return err
 }
 
 // saveCurrentToCollection writes the active request into a collection as an
-// interface file of its own.
+// interface file of its own, at the top of the tree.
 func (a *app) saveCurrentToCollection(collectionID string) error {
 	t := a.current()
 	if t == nil {
@@ -468,21 +874,30 @@ func (a *app) saveCurrentToCollection(collectionID string) error {
 	if err != nil {
 		return err
 	}
-	t.collectionID, t.title, t.path = collectionID, req.Name, req.Path
+	t.collectionID, t.title, t.path, t.folder = collectionID, req.Name, req.Path, ""
+	t.markSaved()
 	return nil
 }
 
 // savedFromTab is the interface a tab's request stands for.
 func savedFromTab(t *tab) savedRequest {
-	return savedRequest{
+	req := savedRequest{
 		Kind:     t.kind,
 		Method:   t.method,
 		URL:      t.url,
 		Params:   rowsToSaved(t.params.Rows),
 		Headers:  rowsToSaved(t.headers.Rows),
 		BodyType: t.bodyType,
-		Body:     t.body.String(),
 	}
+	// A file keeps what its format edits: the text of a code body, the rows of
+	// an encoded one.
+	switch bodyFormatOf(t.bodyType).edits {
+	case editsRows:
+		req.Form = rowsToSaved(t.form.Rows)
+	case editsText:
+		req.Body = t.body.String()
+	}
+	return req
 }
 
 // collectionIndex returns where a collection is kept, or -1.
@@ -508,6 +923,8 @@ func (a *app) activeEnvironment() *environment {
 // openEnvManager shows the environments of the active collection.
 func (a *app) openEnvManager() {
 	a.envOpen = true
+	// What the manager changes waits for its save: a cancel puts this back.
+	a.envEdits = a.store.cloneEnvironments()
 	envs := a.collectionEnvironments()
 	if len(envs) == 0 {
 		a.editEnvironment("")
@@ -530,17 +947,41 @@ func (a *app) editEnvironment(id string) {
 	}
 	a.envName = env.Name
 	a.envVars = widgets.State{Rows: rowsFromSaved(env.Vars), Compact: true}
-	a.envVars.OnChange = func() { a.saveEnvironmentVars() }
 }
 
-// saveEnvironmentVars writes the edited variables back into the environment.
-func (a *app) saveEnvironmentVars() {
-	env := a.store.environment(a.envID)
-	if env == nil {
+// saveEnvEdits keeps what the environment manager changed: the variables of
+// the environment being edited, its name, and which one is active, all of it
+// written in one go. It is the save button's work.
+func (a *app) saveEnvEdits(c *ui.Context) {
+	if env := a.store.environment(a.envID); env != nil {
+		env.Vars = rowsToSaved(a.envVars.Rows)
+	}
+	if err := a.store.saveEnvironments(); err != nil {
+		c.Toast("保存环境失败：" + err.Error())
 		return
 	}
-	env.Vars = rowsToSaved(a.envVars.Rows)
-	_ = a.store.saveEnvironments()
+	a.envEdits = nil
+	a.envOpen = false
+	c.Toast("环境已保存")
+}
+
+// discardEnvEdits puts the environments back as they stood when the manager
+// opened: what it changed without saving is forgotten.
+func (a *app) discardEnvEdits() {
+	if a.envEdits == nil {
+		return
+	}
+	a.store.restoreEnvironments(a.envEdits)
+	a.envEdits = nil
+	if a.store.environment(a.envID) != nil {
+		a.editEnvironment(a.envID)
+		return
+	}
+	id := ""
+	if active := a.store.activeEnvironment(a.active); active != nil {
+		id = active.ID
+	}
+	a.editEnvironment(id)
 }
 
 // resolvedMode is the palette to draw with: System resolves to the
@@ -555,30 +996,53 @@ func (a *app) resolvedMode() design.Mode {
 	return design.Light
 }
 
-// palette returns the colors of this frame, noticing the desktop's
-// appearance for as long as the view still follows it.
-func (a *app) palette(c *ui.Context) design.Palette {
-	if a.mode == design.System && a.applied == design.System {
-		a.systemDark = c.Theme().Dark
+// accent is the accent choice in use.
+func (a *app) accentColor() design.Accent { return design.AccentByName(a.accent) }
+
+// applySettings takes the appearance, accent and language the last run kept.
+func (a *app) applySettings() {
+	s := a.store.settings
+	a.mode = design.ParseMode(s.Mode)
+	if s.Accent != "" {
+		a.accent = s.Accent
 	}
-	return design.PaletteOf(a.resolvedMode())
+	if s.Language != "" {
+		a.language = s.Language
+	}
+	a.applied = design.Mode(-1) // the theme is built again with them
 }
 
-// themeFor returns the theme the window should draw with, nil while it
-// follows the desktop's own theme. In System it leaves the window's theme
-// alone; picking System again after a fixed appearance keeps the desktop's
-// last seen appearance for the rest of the session, as MyGo has no way to
-// hand the window back to the desktop once SetTheme replaced its theme.
+// rememberSettings keeps the appearance, accent and language for the next
+// run.
+func (a *app) rememberSettings() error {
+	a.store.settings = settings{
+		Mode:     a.mode.Key(),
+		Accent:   a.accent,
+		Language: a.language,
+	}
+	return a.store.saveSettings()
+}
+
+// palette returns the colors of this frame.
+func (a *app) palette() design.Palette {
+	return design.PaletteFor(a.resolvedMode(), a.accentColor())
+}
+
+// themeFor is the theme the window draws with: the palette in use, so buttons,
+// inputs and scroll bars take the app's own colors rather than MyGo's default
+// ones. A window that follows the desktop takes the desktop's appearance as it
+// stands when the window opens; MyGo cannot hand a window back to the
+// desktop's own theme once SetTheme replaced it, so following ends there and
+// the next start picks up a change.
 func (a *app) themeFor(c *ui.Context) *ui.Theme {
-	if a.mode == design.System && (a.applied == design.Mode(-1) || a.applied == design.System) {
-		a.applied = design.System
+	if a.applied == design.Mode(-1) {
 		a.systemDark = c.Theme().Dark
-		return nil
 	}
 	target := a.resolvedMode()
-	if a.theme == nil || a.applied != target {
-		a.theme = design.Theme(target)
-		a.applied = target
+	accent := a.accentColor()
+	if a.theme == nil || a.applied != target || a.themeAccent != accent.Name {
+		a.theme = design.Theme(target, accent)
+		a.applied, a.themeAccent = target, accent.Name
 	}
 	return a.theme
 }
@@ -596,7 +1060,7 @@ func (a *app) send(c *ui.Context) {
 		c.Toast(kindName(t.kind) + " 请求尚未实现")
 		return
 	}
-	if t.bodyType == "json" {
+	if t.bodyType == "json" || t.bodyType == "graphql" {
 		if _, err := indentJSON(t.body.String()); err != nil {
 			c.Toast("请求体不是合法 JSON：" + err.Error())
 			return
@@ -606,18 +1070,22 @@ func (a *app) send(c *ui.Context) {
 	url, missing := resolveVars(t.url, vars)
 	params, missingParams := resolveRows(t.params.Enabled(), vars)
 	headers, missingHeaders := resolveRows(t.headers.Enabled(), vars)
+	form, missingForm := resolveRows(t.form.Enabled(), vars)
 	body, missingBody := resolveVars(t.body.String(), vars)
-	missing = dedupe(append(append(append(missing, missingParams...), missingHeaders...), missingBody...))
+	missing = dedupe(append(append(append(append(missing, missingParams...),
+		missingHeaders...), missingForm...), missingBody...))
 	if len(missing) > 0 {
 		c.Toast("未解析的环境变量：" + strings.Join(missing, "、"))
 		return
 	}
 	req, err := buildRequest(requestSpec{
-		method:  t.method,
-		rawURL:  url,
-		params:  params,
-		headers: headers,
-		body:    body,
+		method:   t.method,
+		rawURL:   url,
+		params:   params,
+		headers:  headers,
+		bodyType: t.bodyType,
+		body:     body,
+		form:     a.formParts(t, form),
 	})
 	if err != nil {
 		c.Toast(err.Error())
@@ -650,12 +1118,33 @@ func (a *app) apply(t *tab, res *response) {
 	if res.err != nil {
 		return
 	}
-	t.respEdit.Buffer.Set(res.body)
-	if isJSON(res.headers.Get("Content-Type"), res.body) {
-		t.respEdit.Buffer.SetLanguage(editor.LanguageFor("response.json"))
-	} else {
-		t.respEdit.Buffer.SetLanguage(nil)
+	lang := languageForResponse(res.headers.Get("Content-Type"), res.body)
+	t.respEdit.Buffer.SetLanguage(lang)
+	if lang == nil {
+		t.respEdit.Buffer.Set(res.body)
+		return
 	}
+	// A JSON body is indented as it comes in: the server sends it over one
+	// line more often than not, and the pane reads it as code.
+	t.respEdit.Buffer.Set(prettyResponse(res.body))
+}
+
+// languageForResponse is the syntax a response is shown in: JSON when the
+// server says so, or when the body parses as JSON whatever it says.
+func languageForResponse(contentType, body string) *editor.Language {
+	if isJSON(contentType, body) {
+		return editor.LanguageFor("response.json")
+	}
+	return nil
+}
+
+// prettyResponse indents a JSON body, keeping it as it came when it does not
+// parse.
+func prettyResponse(body string) string {
+	if pretty, err := indentJSON(body); err == nil {
+		return pretty
+	}
+	return body
 }
 
 // formatBody rewrites the active tab's body with two-space indentation.
@@ -702,7 +1191,10 @@ func isJSON(contentType, body string) bool {
 func rowsFromSaved(rows []savedRow) []widgets.Row {
 	out := make([]widgets.Row, 0, len(rows)+1)
 	for _, r := range rows {
-		out = append(out, widgets.Row{Enabled: r.Enabled, Key: r.Key, Value: r.Value})
+		out = append(out, widgets.Row{
+			Enabled: r.Enabled, Key: r.Key, Value: r.Value,
+			File: r.File, FileName: r.FileName,
+		})
 	}
 	return append(out, widgets.Row{Enabled: true})
 }
@@ -712,10 +1204,13 @@ func rowsFromSaved(rows []savedRow) []widgets.Row {
 func rowsToSaved(rows []widgets.Row) []savedRow {
 	out := make([]savedRow, 0, len(rows))
 	for _, r := range rows {
-		if r.Key == "" && r.Value == "" {
+		if r.Key == "" && r.Value == "" && r.File == "" {
 			continue
 		}
-		out = append(out, savedRow{Enabled: r.Enabled, Key: r.Key, Value: r.Value})
+		out = append(out, savedRow{
+			Enabled: r.Enabled, Key: r.Key, Value: r.Value,
+			File: r.File, FileName: r.FileName,
+		})
 	}
 	return out
 }

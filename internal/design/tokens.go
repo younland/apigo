@@ -18,6 +18,15 @@ const (
 	RowGap           float32 = 8
 	Radius           float32 = 4
 	BorderWidth      float32 = 1
+	// TabMinWidth keeps a request tab wide enough for its method and a short
+	// title, as Hoppscotch's per-tab minimum does.
+	TabMinWidth float32 = 110
+	// CollectionTabMaxWidth caps a collection tab of the top bar, so one long
+	// name leaves the tabs beside it in view.
+	CollectionTabMaxWidth float32 = 240
+	// RequestTabMaxWidth caps a request tab the same way: a long title, a URL
+	// usually, is shortened rather than taking the strip.
+	RequestTabMaxWidth float32 = 260
 )
 
 // Type sizes, in DIPs. Hoppscotch sets body text at 12px on a 16px line.
@@ -29,6 +38,11 @@ const (
 	LineHeight      float32 = 16
 )
 
+// FontFamily is the family the app draws with: the embedded interface font
+// main.go registers at startup, and the system's own where it cannot be
+// added.
+const FontFamily = "HarmonyOS Sans SC"
+
 // Palette is one appearance of the app.
 type Palette struct {
 	Dark bool
@@ -38,6 +52,9 @@ type Palette struct {
 	SurfaceHover  ui.Color
 	Divider       ui.Color
 	DividerStrong ui.Color
+	// Border is the light border of controls: text inputs, the method box and
+	// other fields the app draws itself.
+	Border ui.Color
 
 	Text          ui.Color
 	TextSecondary ui.Color
@@ -74,6 +91,7 @@ var (
 		SurfaceHover:  ui.Hex("#f3f4f6"),
 		Divider:       ui.Hex("#f3f4f6"),
 		DividerStrong: ui.Hex("#d1d5db"),
+		Border:        ui.Hex("#e5e7eb"),
 
 		Text:          ui.Hex("#111827"),
 		TextSecondary: ui.Hex("#6b7280"),
@@ -110,6 +128,7 @@ var (
 		SurfaceHover:  ui.Hex("#262626"),
 		Divider:       ui.Hex("#1f1f1f"),
 		DividerStrong: ui.Hex("#27272a"),
+		Border:        ui.Hex("#2f2f33"),
 
 		Text:          ui.Hex("#fafafa"),
 		TextSecondary: ui.Hex("#a3a3a3"),

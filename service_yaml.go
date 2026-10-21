@@ -25,21 +25,49 @@ func readYAMLIfExists(path string, v any) error {
 	return err
 }
 
+// tmpDirName is the directory that holds files being written: a write lands
+// there, then moves over the file it replaces, so a crash cannot leave half a
+// file behind.
+const tmpDirName = ".tmp"
+
 // writeYAML writes a file whole, replacing it in one rename so a crash
-// cannot leave half a file behind.
+// cannot leave half a file behind. The file being written waits in the .tmp
+// directory of the collection it belongs to, or of its own directory when it
+// belongs to none.
 func writeYAML(path string, v any) error {
 	data, err := yaml.Marshal(v)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
+	tmpDir := filepath.Join(tmpRoot(dir), tmpDirName)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return err
+	}
+	tmp := filepath.Join(tmpDir, filepath.Base(path)+".tmp")
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// tmpRoot is where the temporary files of a directory's writes wait: the
+// collection the directory belongs to, the one holding apigo.yaml, or the
+// directory itself when it belongs to none.
+func tmpRoot(dir string) string {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, metaFile)); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
 }
 
 // isYAMLFile reports whether a name is one of the files we read.

@@ -10,10 +10,15 @@ import (
 func main() {
 	a := newApp()
 	mygo.App.WhenReady(func() {
-		a.store = newStore(defaultStoreDir())
+		// The collections live where the user put them, or in the app's own
+		// data directory.
+		a.baseDir = defaultStoreDir()
+		a.store = newStore(storeDirAt(a.baseDir))
 		if err := a.store.load(); err != nil {
 			log.Printf("读取本地集合失败：%v", err)
 		}
+		// The appearance, accent and language of the last run.
+		a.applySettings()
 		window := mygo.NewWindow(mygo.WindowOptions{
 			Title:     "apigo",
 			Width:     1280,
@@ -28,8 +33,41 @@ func main() {
 		// Responses land on the window's thread, never on the one that
 		// waited for the network.
 		a.after = window.Update
+		// A collection's folder opens in the desktop's file manager, and the
+		// settings ask it for another data directory.
+		a.opener = mygo.Shell.OpenPath
+		a.chooseDir = chooseDirectory
+		a.chooseFile = chooseUpload
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// chooseDirectory asks the desktop's file manager for a folder, "" when the
+// user cancels.
+func chooseDirectory() (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Title:             "选择数据目录",
+		ButtonLabel:       "选择",
+		Directory:         true,
+		CreateDirectories: true,
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// chooseUpload asks the desktop for a file to upload, "" when the user
+// cancels.
+func chooseUpload() (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Title:       "选择要上传的文件",
+		ButtonLabel: "选择",
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
 }

@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/egoist/mygo"
 )
@@ -26,6 +25,10 @@ type savedRow struct {
 	Enabled bool   `yaml:"enabled"`
 	Key     string `yaml:"key,omitempty"`
 	Value   string `yaml:"value,omitempty"`
+	// File is the path of an uploaded file relative to the collection, and
+	// FileName the name it had when it was chosen.
+	File     string `yaml:"file,omitempty"`
+	FileName string `yaml:"fileName,omitempty"`
 }
 
 // savedRequest is one interface file, named after the interface itself.
@@ -39,6 +42,8 @@ type savedRequest struct {
 	Headers  []savedRow `yaml:"headers,omitempty"`
 	BodyType string     `yaml:"bodyType,omitempty"`
 	Body     string     `yaml:"body,omitempty"`
+	// Form holds the rows of form-data and x-www-form-urlencoded bodies.
+	Form []savedRow `yaml:"form,omitempty"`
 }
 
 // folder is one directory of a collection's tree: a folder of the tree, or
@@ -79,6 +84,9 @@ type store struct {
 	collections  []collection
 	environments []environment
 	history      []historyEntry
+	settings     settings
+	// hidden are the collections taken off the list, whose directories stay.
+	hidden []string
 }
 
 func newStore(dir string) *store { return &store{dir: dir} }
@@ -109,15 +117,19 @@ func (s *store) staticDir(id string) string {
 }
 
 // load reads every collection directory, the global environments and the
-// history, treating missing ones as empty.
+// history, treating missing ones as empty. The collections taken off the list
+// stay on disk and are left out here.
 func (s *store) load() error {
 	entries, err := os.ReadDir(s.collectionsDir())
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	if err := s.loadHidden(); err != nil {
+		return err
+	}
 	s.collections, s.environments = nil, nil
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || s.isHidden(entry.Name()) {
 			continue
 		}
 		col, err := s.readCollection(entry.Name())
@@ -128,6 +140,9 @@ func (s *store) load() error {
 	}
 	s.sortCollections()
 	if err := s.loadGlobalEnvironments(); err != nil {
+		return err
+	}
+	if err := s.loadSettings(); err != nil {
 		return err
 	}
 	return readYAMLIfExists(filepath.Join(s.dir, "history.yaml"), &s.history)
@@ -206,66 +221,6 @@ func (s *store) collection(id string) *collection {
 		return &s.collections[i]
 	}
 	return nil
-}
-
-// defaultCollectionName names a collection that was saved without one.
-const defaultCollectionName = "集合"
-
-// newCollection creates a collection directory with its default
-// environments, each carrying an empty BaseURL variable.
-func (s *store) newCollection(name string) (collection, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = defaultCollectionName
-	}
-	col := collection{ID: s.uniqueCollectionID(name), Name: name}
-	col.Root = folder{Name: rootFolderName}
-	if err := s.saveCollection(col); err != nil {
-		return collection{}, err
-	}
-	return col, s.addDefaultEnvironments(col.ID)
-}
-
-// uniqueCollectionID turns a collection name into the directory its files
-// live in, numbered when the name is taken.
-func (s *store) uniqueCollectionID(name string) string {
-	base := safeFileName(name)
-	if base == "" {
-		base = "collection"
-	}
-	id := base
-	for n := 2; s.collectionIDTaken(id); n++ {
-		id = fmt.Sprintf("%s-%d", base, n)
-	}
-	return id
-}
-
-// collectionIDTaken reports whether a directory name is already in use.
-func (s *store) collectionIDTaken(id string) bool {
-	if s.collectionIndex(id) >= 0 {
-		return true
-	}
-	_, err := os.Stat(s.collectionDir(id))
-	return err == nil
-}
-
-// deleteCollection removes a collection, its environments and its
-// directory.
-func (s *store) deleteCollection(id string) error {
-	if i := s.collectionIndex(id); i >= 0 {
-		s.collections = append(s.collections[:i], s.collections[i+1:]...)
-	}
-	kept := s.environments[:0]
-	for _, env := range s.environments {
-		if env.Scope != id {
-			kept = append(kept, env)
-		}
-	}
-	s.environments = kept
-	if err := s.saveEnvironments(); err != nil {
-		return err
-	}
-	return os.RemoveAll(s.collectionDir(id))
 }
 
 // dirText is the directory the collections and environments are kept in.

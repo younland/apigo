@@ -1,81 +1,131 @@
 package main
 
 import (
+	"fmt"
+
 	"apigo/internal/design"
 	"apigo/internal/icons"
+
+	"apigo/widgets"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// envModal manages the environments of the active collection: their names,
-// which one is active, and their variables.
+// envModal manages the environments of the active collection: the list of them
+// on the left, the variables of the one being edited on the right, and the
+// buttons that keep or drop what it changed.
 func (a *app) envModal(c *ui.Context, p design.Palette) {
+	// Closed by Escape or its backdrop is a cancel.
+	if a.envEdits != nil && !a.envOpen {
+		a.discardEnvEdits()
+	}
 	if !a.envOpen || a.active == "" {
 		return
 	}
 	ui.Modal(c, &a.envOpen, func() {
-		ui.Column(c).Width(560).Padding(design.PanelPadding).Gap(design.RowGap).
+		ui.Column(c).Width(720).Height(560).Padding(design.PanelPadding).Gap(design.RowGap).
 			Background(p.Background).Radius(8).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "环境").Bold().FontSize(design.FontSizeTitle).TextColor(p.Text)
 				ui.Text(c, a.activeCollection().Name).FontSize(design.FontSizeTiny).
 					TextColor(p.TextMuted)
 			})
-			for _, env := range a.collectionEnvironments() {
-				a.envRow(c, p, env)
-			}
-			if ui.Button(c, "新建环境").Clicked() {
-				if _, err := a.store.addEnvironment(a.active, "新环境"); err != nil {
-					c.Toast("新建环境失败：" + err.Error())
-					return
-				}
-				envs := a.collectionEnvironments()
-				if len(envs) > 0 {
-					a.editEnvironment(envs[len(envs)-1].ID)
-				}
-			}
 			a.divider(c, p)
-			a.envEditor(c, p)
+			ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Start).
+				Gap(design.PanelPadding * 2).Children(func() {
+				a.envList(c, p)
+				a.envEditor(c, p)
+			})
+			a.divider(c, p)
+			ui.Row(c).FillWidth().Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
+				ui.Row(c).Grow(1)
+				if ui.Button(c, "取消").Cursor(ui.CursorPointer).Clicked() {
+					a.discardEnvEdits()
+					a.envOpen = false
+				}
+				if saveButton(c, p).Clicked() {
+					a.saveEnvEdits(c)
+				}
+			})
 		})
 	})
 }
 
-// envRow is one environment: the mark that activates it, its name, and the
-// cross that deletes it.
-func (a *app) envRow(c *ui.Context, p design.Palette, env environment) {
-	mark, color := "○", p.TextMuted
-	if env.Active {
-		mark, color = "●", p.Accent
+// saveButton is the button that keeps what a dialog changed: the accent of the
+// app, as a primary action reads.
+func saveButton(c *ui.Context, p design.Palette) ui.Element {
+	btn := ui.ButtonBase(c).Height(32).Padding(0, 14).Radius(design.Radius).
+		Label("保存环境").Background(p.Accent).Cursor(ui.CursorPointer)
+	if btn.Hovered() {
+		btn.Background(p.AccentHover)
 	}
-	nameColor := p.TextSecondary
-	if env.ID == a.envID {
-		nameColor = p.Text
-	}
-	ui.Row(c).Height(28).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
-		if ui.ButtonBase(c).Width(20).Height(20).Label("激活环境 " + env.Name).
-			Children(func() {
-				ui.Text(c, mark).FontSize(design.FontSizeBody).TextColor(color)
-			}).Clicked() {
-			if err := a.store.activateEnvironment(env.ID); err != nil {
-				c.Toast("激活环境失败：" + err.Error())
-			}
+	btn.Children(func() {
+		ui.Text(c, "保存").FontSize(design.FontSizeBody).
+			TextColor(p.AccentText).SingleLine()
+	})
+	return btn
+}
+
+// envList lists the environments, the one being edited marked, with the button
+// that makes another.
+func (a *app) envList(c *ui.Context, p design.Palette) {
+	ui.Column(c).Width(200).Gap(2).Children(func() {
+		for _, env := range a.collectionEnvironments() {
+			a.envRow(c, p, env)
 		}
-		if ui.ButtonBase(c).Grow(1).Height(28).Label("编辑环境 " + env.Name).
-			Justify(ui.Start).Children(func() {
-			ui.Text(c, env.Name).FontSize(design.FontSizeBody).TextColor(nameColor).SingleLine()
-		}).Clicked() {
+		if ui.Button(c, "新建环境").Cursor(ui.CursorPointer).Clicked() {
+			// Added in memory: saving the manager writes it, cancelling forgets it.
+			env := a.store.newEnvironment(a.active, "新环境")
 			a.editEnvironment(env.ID)
-		}
-		if ui.ButtonBase(c).Width(22).Height(22).Label("删除环境 " + env.Name).
-			Children(func() {
-				ui.Icon(c, icons.Trash).FontSize(11).TextColor(p.TextMuted)
-			}).Clicked() {
-			a.removeEnvironment(env.ID)
 		}
 	})
 }
 
-// envEditor edits the selected environment's name and variables.
+// envRow is one environment of the list: the mark that activates it, its name,
+// and the cross that deletes it.
+func (a *app) envRow(c *ui.Context, p design.Palette, env environment) {
+	// Selecting an environment edits it and makes it the one requests send
+	// with: the tick follows the choice.
+	color, bg := p.TextSecondary, ui.Color{}
+	switch {
+	case env.Active:
+		color = p.Accent
+	case env.ID == a.envID:
+		color = p.Text
+	}
+	if env.ID == a.envID {
+		bg = p.SurfaceHover
+	}
+	row := ui.Row(c).FillWidth().Height(30).AlignItems(ui.Center).Gap(6).Padding(0, 6).
+		Radius(design.Radius).Background(bg)
+	row.Children(func() {
+		if ui.ButtonBase(c).Grow(1).Height(30).Label("环境 " + env.Name).
+			Justify(ui.Start).Gap(8).Cursor(ui.CursorPointer).Children(func() {
+			if env.Active {
+				ui.Icon(c, icons.Check).FontSize(12).TextColor(p.Accent)
+			} else {
+				ui.Row(c).Width(12)
+			}
+			ui.Text(c, env.Name).FontSize(design.FontSizeBody).TextColor(color).SingleLine()
+		}).Clicked() {
+			// In memory: saving the manager makes it the active one.
+			_ = a.store.selectEnvironment(env.ID)
+			a.editEnvironment(env.ID)
+		}
+		if ui.ButtonBase(c).Width(22).Height(22).Label("删除环境 " + env.Name).
+			Cursor(ui.CursorPointer).Children(func() {
+			ui.Icon(c, icons.Trash).FontSize(11).TextColor(p.Danger)
+		}).Clicked() {
+			a.removeEnvironment(env.ID)
+		}
+	})
+	if env.ID != a.envID && row.Hovered() {
+		row.Background(p.SurfaceHover)
+	}
+}
+
+// envEditor edits the selected environment: its name, and its variables one to
+// a line.
 func (a *app) envEditor(c *ui.Context, p design.Palette) {
 	env := a.store.environment(a.envID)
 	if env == nil {
@@ -83,17 +133,49 @@ func (a *app) envEditor(c *ui.Context, p design.Palette) {
 			TextColor(p.TextMuted)
 		return
 	}
-	ui.Text(c, "环境变量").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
-	if ui.TextInput(c, &a.envName).Width(240).Label("环境名称").Changed() {
-		name, err := a.store.renameEnvironment(a.envID, a.envName)
-		if err != nil {
-			c.Toast("重命名环境失败：" + err.Error())
+	ui.Column(c).Grow(1).Height(480).Gap(design.RowGap).Children(func() {
+		if ui.TextInput(c, &a.envName).Width(220).Label("环境名称").Changed() {
+			// The file follows the name when the manager is saved.
+			a.envName = a.store.nameEnvironment(a.envID, a.envName)
 		}
-		a.envName = name
-	}
-	ui.Text(c, "变量可在 URL、参数、请求头与请求体里以 {{name}} 使用").
-		FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
-	a.envVars.View(c, p)
+		ui.Text(c, "变量可在 URL、参数、请求头与请求体里以 {{name}} 使用").
+			FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+		ui.Text(c, "环境变量").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+		a.envVars.Flush()
+		// The variables scroll inside the editor: the window stays the height
+		// the settings and the list beside it read at.
+		ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+			ui.Column(c).FillWidth().Gap(2).Children(func() {
+				// Built from a snapshot: a row's own cross deletes it while the
+				// list is still being drawn.
+				for i := range append([]widgets.Row(nil), a.envVars.Rows...) {
+					if i >= len(a.envVars.Rows) {
+						break
+					}
+					a.envVarRow(c, p, i)
+				}
+			})
+		})
+	})
+}
+
+// envVarRow is one variable on a line: its name, its value, and the cross that
+// deletes it, which reads in the danger color. The rows are kept as they are
+// typed and written when the manager is saved.
+func (a *app) envVarRow(c *ui.Context, p design.Palette, i int) {
+	row := &a.envVars.Rows[i]
+	ui.Row(c).FillWidth().Height(30).AlignItems(ui.Center).Gap(design.RowGap).Children(func() {
+		ui.TextInput(c, &row.Key).Placeholder("变量名").Grow(2).MinWidth(0).
+			Label(fmt.Sprintf("变量名第 %d 行", i+1))
+		ui.TextInput(c, &row.Value).Placeholder("值").Grow(3).MinWidth(0).
+			Label(fmt.Sprintf("变量值第 %d 行", i+1))
+		if ui.ButtonBase(c).Width(24).Height(24).
+			Label(fmt.Sprintf("删除变量第 %d 行", i+1)).Cursor(ui.CursorPointer).Children(func() {
+			ui.Icon(c, icons.Trash).FontSize(12).TextColor(p.Danger)
+		}).Clicked() {
+			a.envVars.RemoveAt(i)
+		}
+	})
 }
 
 // removeEnvironment deletes an environment, moving the editing and the
@@ -104,9 +186,8 @@ func (a *app) removeEnvironment(id string) {
 	if env != nil {
 		scope = env.Scope
 	}
-	if err := a.store.deleteEnvironment(id); err != nil {
-		return
-	}
+	// Out of memory only: saving the manager is what takes it off the disk.
+	a.store.forgetEnvironment(id)
 	envs := a.store.environmentsFor(scope)
 	if a.envID == id {
 		a.envID = ""
@@ -117,29 +198,196 @@ func (a *app) removeEnvironment(id string) {
 		}
 	}
 	if scope != "" && a.store.activeEnvironment(scope) == nil && len(envs) > 0 {
-		_ = a.store.activateEnvironment(envs[0].ID)
+		_ = a.store.selectEnvironment(envs[0].ID)
 	}
 }
 
-// settingsModal shows the appearance, where the collections are kept, and
-// the version.
+// languages are the interface languages the settings offer: the app is
+// written in one for now.
+var languages = []string{"简体中文"}
+
+// appearances are the background choices of the settings, with the icon each
+// shows.
+var appearances = []struct {
+	mode  design.Mode
+	icon  *ui.SVG
+	label string
+}{
+	{design.System, icons.Monitor, "跟随系统"},
+	{design.Light, icons.Sun, "浅色"},
+	{design.Dark, icons.Moon, "深色"},
+	{design.Black, icons.MoonLit, "纯黑"},
+}
+
+// settingsModal shows the app's settings: the language, the appearance and
+// the accent, and where the collections are kept.
 func (a *app) settingsModal(c *ui.Context, p design.Palette) {
 	if !a.settingsOpen {
 		return
 	}
 	ui.Modal(c, &a.settingsOpen, func() {
-		ui.Column(c).Width(420).Padding(design.PanelPadding).Gap(design.RowGap).
+		ui.Column(c).Width(720).Padding(24).Gap(20).
 			Background(p.Background).Radius(8).Children(func() {
-			ui.Text(c, "设置").Bold().FontSize(design.FontSizeTitle).TextColor(p.Text)
-			ui.Text(c, "外观").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
-			if ui.Button(c, a.mode.String()).Clicked() {
-				a.mode = a.mode.Next()
-			}
-			ui.Text(c, "数据目录").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
-			ui.Text(c, a.store.dirText()).FontSize(design.FontSizeTiny).
-				TextColor(p.TextSecondary).Selectable()
-			ui.Text(c, "版本").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
-			ui.Text(c, appVersion()).FontSize(design.FontSizeTiny).TextColor(p.TextSecondary)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "设置").Bold().FontSize(design.FontSizeDisplay).TextColor(p.Text)
+				ui.Row(c).Grow(1)
+				if ui.ButtonBase(c).Width(24).Height(24).Label("关闭设置").Cursor(ui.CursorPointer).
+					Children(func() {
+						ui.Icon(c, icons.Close).FontSize(12).TextColor(p.TextMuted)
+					}).Clicked() {
+					a.settingsOpen = false
+				}
+			})
+			a.settingsSection(c, p, "通用", "应用程序中使用的通用设置", func() {
+				a.settingsLabel(c, p, "语言")
+				a.languagePicker(c, p)
+			})
+			a.divider(c, p)
+			a.settingsSection(c, p, "主题", "自定义您的应用程序主题。", func() {
+				a.settingsLabel(c, p, "背景")
+				ui.Text(c, a.backgroundNote()).FontSize(design.FontSizeBody).
+					TextColor(p.TextMuted)
+				a.appearanceButtons(c, p)
+				ui.Row(c).Height(design.RowGap)
+				a.settingsLabel(c, p, "强调色")
+				ui.Text(c, a.accentColor().Name).FontSize(design.FontSizeBody).
+					TextColor(p.TextMuted)
+				a.accentButtons(c, p)
+			})
+			a.divider(c, p)
+			a.settingsSection(c, p, "数据", "集合、环境与历史存放的位置。", func() {
+				a.settingsLabel(c, p, "数据目录")
+				ui.Text(c, a.store.dirText()).FontSize(design.FontSizeBody).
+					TextColor(p.TextSecondary).Selectable()
+				ui.Row(c).Gap(design.RowGap).Children(func() {
+					if ui.Button(c, "更换目录").Cursor(ui.CursorPointer).Clicked() {
+						a.chooseDataDir(c)
+					}
+					if ui.Button(c, "打开目录").Cursor(ui.CursorPointer).Clicked() {
+						if err := a.openFolder(a.store.dirText()); err != nil {
+							c.Toast("打开目录失败：" + err.Error())
+						}
+					}
+				})
+				a.settingsLabel(c, p, "版本")
+				ui.Text(c, appVersion()).FontSize(design.FontSizeBody).
+					TextColor(p.TextSecondary)
+			})
 		})
 	})
+}
+
+// settingsSection draws a settings section: what it changes on the left, its
+// controls on the right.
+func (a *app) settingsSection(c *ui.Context, p design.Palette, title, note string, controls func()) {
+	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(24).Children(func() {
+		ui.Column(c).Width(240).Gap(4).Children(func() {
+			ui.Text(c, title).Bold().FontSize(design.FontSizeTitle).TextColor(p.Text)
+			ui.Text(c, note).FontSize(design.FontSizeBody).TextColor(p.TextMuted)
+		})
+		ui.Column(c).Grow(1).Gap(6).Children(controls)
+	})
+}
+
+// settingsLabel is the name of one setting.
+func (a *app) settingsLabel(c *ui.Context, p design.Palette, name string) {
+	ui.Text(c, name).Bold().FontSize(design.FontSizeBody).TextColor(p.Text)
+}
+
+// backgroundNote names the appearance in use, as the settings show it: the
+// desktop's own appearance while following it.
+func (a *app) backgroundNote() string {
+	switch a.mode {
+	case design.Light:
+		return "浅色"
+	case design.Dark:
+		return "深色"
+	case design.Black:
+		return "纯黑"
+	}
+	if a.resolvedMode() == design.Dark {
+		return "系统（暗色）"
+	}
+	return "系统（亮色）"
+}
+
+// languagePicker picks the interface language.
+func (a *app) languagePicker(c *ui.Context, p design.Palette) {
+	btn := ui.ButtonBase(c).Width(200).Height(36).Padding(0, 12).Gap(8).
+		MinWidth(0).Background(p.Surface).Border(design.BorderWidth, p.Border).
+		Label("界面语言 " + a.language).Justify(ui.Start).Cursor(ui.CursorPointer).Children(func() {
+		ui.Icon(c, icons.Translate).FontSize(14).TextColor(p.TextSecondary)
+		ui.Text(c, a.language).FontSize(design.FontSizeBody).TextColor(p.Text).SingleLine()
+		ui.Row(c).Grow(1)
+		ui.Icon(c, icons.Chevron).FontSize(12).TextColor(p.TextMuted)
+	})
+	if btn.Clicked() {
+		a.languageOpen = !a.languageOpen
+	}
+	ui.PopoverBase(c, btn, &a.languageOpen, func(panel ui.Element) {
+		menuPanel(panel, p, 200)
+		for _, language := range languages {
+			row := menuRow(ui.ButtonBase(c).Height(28).Label(language).Justify(ui.Start).
+				Padding(0, 8).Cursor(ui.CursorPointer).Children(func() {
+				ui.Text(c, language).FontSize(design.FontSizeBody).
+					TextColor(p.TextSecondary).SingleLine()
+			}), p)
+			if row.Clicked() {
+				a.language, a.languageOpen = language, false
+				a.saveSettingsOrToast(c)
+			}
+		}
+	})
+}
+
+// appearanceButtons picks the background of the app.
+func (a *app) appearanceButtons(c *ui.Context, p design.Palette) {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		for _, appearance := range appearances {
+			selected := a.mode == appearance.mode
+			color := p.TextMuted
+			if selected {
+				color = p.Accent
+			}
+			btn := ui.ButtonBase(c).Width(36).Height(32).Label(appearance.label).
+				Cursor(ui.CursorPointer).Children(func() {
+				ui.Icon(c, appearance.icon).FontSize(16).TextColor(color)
+			})
+			if selected {
+				btn.Background(p.SurfaceHover).Radius(design.Radius)
+			}
+			if btn.Clicked() {
+				a.mode = appearance.mode
+				a.saveSettingsOrToast(c)
+			}
+		}
+	})
+}
+
+// accentButtons picks the accent color of the app.
+func (a *app) accentButtons(c *ui.Context, p design.Palette) {
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		for _, accent := range design.Accents {
+			selected := a.accentColor().Name == accent.Name
+			btn := ui.ButtonBase(c).Width(30).Height(30).Label("强调色 " + accent.Name).
+				Cursor(ui.CursorPointer).Children(func() {
+				swatch := ui.Row(c).Size(18, 18).Radius(9).Background(accent.Base)
+				if selected {
+					swatch.Border(2, p.Text)
+				}
+			})
+			if btn.Clicked() {
+				a.accent = accent.Name
+				a.saveSettingsOrToast(c)
+			}
+		}
+	})
+}
+
+// saveSettingsOrToast keeps the settings for the next run, saying so when the
+// file cannot be written.
+func (a *app) saveSettingsOrToast(c *ui.Context) {
+	if err := a.rememberSettings(); err != nil {
+		c.Toast("保存设置失败：" + err.Error())
+	}
 }

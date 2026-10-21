@@ -13,14 +13,19 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// shotStore is the directory the demo app reads and writes: TestShots points
+// it at the test's own directory, so a shot never leaves a collection beside
+// the repository. Empty means the app's default data directory.
+var shotStore string
+
 // demoApp is an app with one collection, its default-equivalent
-// environment, and the collection open.
+// environment, and the collection open on one of its requests.
 func demoApp() *app {
 	a := newApp()
-	a.store = newStore("")
+	a.store = newStore(shotStore)
 	a.store.collections = []collection{
 		{
-			ID: "collection-1", Name: "智慧康养机器人",
+			ID: "collection-1", Name: "示例接口集",
 			Root: folder{Name: rootFolderName, Requests: []savedRequest{
 				{Path: "列出宠物", Name: "列出宠物", Kind: kindREST, Method: "GET", URL: "https://api.example.com/v1/pets"},
 				{Path: "新建宠物", Name: "新建宠物", Kind: kindREST, Method: "POST", URL: "https://api.example.com/v1/pets"},
@@ -38,7 +43,7 @@ func demoApp() *app {
 				}},
 			}},
 		},
-		{ID: "collection-2", Name: "xygo-admin", Root: folder{Name: rootFolderName}},
+		{ID: "collection-2", Name: "空白示例集", Root: folder{Name: rootFolderName}},
 	}
 	a.store.environments = []environment{
 		{ID: "env-1", Name: "本地", Scope: "collection-1", Active: true, Vars: []savedRow{
@@ -53,6 +58,27 @@ func demoApp() *app {
 		}},
 	}
 	a.openCollection("collection-1")
+	// A collection opens with no tab at all, so the shots start from one of its
+	// requests being open. The tab is seeded in memory rather than opened from
+	// the tree: the demo collection has no files, and opening a request would
+	// write the tab back beside the repository.
+	t := newTab()
+	t.kind, t.collectionID = kindREST, "collection-1"
+	t.title, t.method, t.url = "列出宠物", "GET", "https://api.example.com/v1/pets"
+	t.path, t.folder = "列出宠物", ""
+	t.markSaved()
+	a.openTab(a.space(), t, 0)
+	return a
+}
+
+// settingsDemo is the demo app with the settings dialog over it. The data
+// directory reads as an example path rather than the test's own: a shot
+// should not carry the name of the machine that made it.
+func settingsDemo() *app {
+	const exampleDir = `C:\Users\you\AppData\Roaming\apigo`
+	a := demoApp()
+	a.store.dir = exampleDir
+	a.settingsOpen = true
 	return a
 }
 
@@ -69,6 +95,10 @@ func TestShots(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// The demo collection has no files, so whatever a shot writes goes to the
+	// test's own directory rather than beside the repository.
+	stores := t.TempDir()
+	shotStore = stores
 	shots := []struct {
 		name  string
 		mode  design.Mode
@@ -79,9 +109,63 @@ func TestShots(t *testing.T) {
 		{"home-list", design.Light, func(a *app) {
 			a.store = demoApp().store
 		}},
-		{"collection-empty", design.Light, func(a *app) { *a = *demoApp() }},
+		{"home-row-menu", design.Light, func(a *app) {
+			a.store = demoApp().store
+			open := a.menuFlag("collection/collection-1")
+			*open = true
+		}},
+		{"home-rename-collection", design.Light, func(a *app) {
+			a.store = demoApp().store
+			a.openRenameModal("collection-1")
+		}},
+		{"tab-menu", design.Light, func(a *app) {
+			*a = *demoApp()
+			open := a.menuFlag("tab/collection-1")
+			*open = true
+		}},
+		{"request-tab-menu", design.Light, func(a *app) {
+			*a = *demoApp()
+			open := a.menuFlag(requestTabMenuKey(a.current()))
+			*open = true
+		}},
+		{"collection-request", design.Light, func(a *app) { *a = *demoApp() }},
+		{"start-hint", design.Light, func(a *app) {
+			// A collection opened, nothing chosen yet: the pane says what to do.
+			*a = *demoApp()
+			a.spaces["collection-1"] = newWorkspace()
+		}},
+		{"root-add-menu", design.Light, func(a *app) {
+			*a = *demoApp()
+			open := a.menuFlag("folder/")
+			*open = true
+		}},
+		{"root-add-menu-dark", design.Dark, func(a *app) {
+			*a = *demoApp()
+			open := a.menuFlag("folder/")
+			*open = true
+		}},
 		{"collection-dark", design.Dark, func(a *app) { *a = *demoApp() }},
 		{"collection-black", design.Black, func(a *app) { *a = *demoApp() }},
+		{"request-menu", design.Light, func(a *app) {
+			*a = *demoApp()
+			open := a.menuFlag("request-menu/设备/设备列表")
+			*open = true
+		}},
+		{"save-dialog", design.Light, func(a *app) {
+			*a = *demoApp()
+			a.current().title = "新的接口"
+			a.askWhereToSave(a.current())
+		}},
+		{"tree-open-request", design.Light, func(a *app) {
+			*a = *demoApp()
+			col := a.store.collection("collection-1")
+			if col == nil {
+				return
+			}
+			if req, ok := findRequest(col.Root, "设备列表"); ok {
+				a.openRequest("collection-1", req)
+			}
+		}},
 		{"request-filled", design.Light, func(a *app) {
 			*a = *demoApp()
 			t := a.current()
@@ -113,6 +197,37 @@ func TestShots(t *testing.T) {
 			t.setBodyLanguage()
 			t.body.Set("{\n  \"name\": \"Ada\",\n  \"tags\": [\"cat\"]\n}")
 		}},
+		{"body-form", design.Light, func(a *app) {
+			*a = *demoApp()
+			t := a.current()
+			t.url = "https://api.example.com/v1/pets"
+			t.reqTab = 2
+			t.bodyType = "urlencoded"
+			t.form.Rows = []widgets.Row{
+				{Enabled: true, Key: "name", Value: "Ada"},
+				{Enabled: true, Key: "tags", Value: "cat"},
+				{Enabled: false, Key: "debug", Value: "1"},
+			}
+		}},
+		{"body-binary", design.Light, func(a *app) {
+			*a = *demoApp()
+			t := a.current()
+			t.url = "https://api.example.com/v1/pets"
+			t.reqTab = 2
+			t.bodyType = "binary"
+		}},
+		{"body-form-file", design.Light, func(a *app) {
+			*a = *demoApp()
+			t := a.current()
+			t.url = "https://api.example.com/v1/pets"
+			t.reqTab = 2
+			t.bodyType = "form-data"
+			t.form.Rows = []widgets.Row{
+				{Enabled: true, Key: "参数 1", File: "static/2025-10-20/9f2c", FileName: "Vue-Go冲锋Logo.png"},
+				{Enabled: true, Key: "备注", Value: "说明文本"},
+				{Enabled: true},
+			}
+		}},
 		{"tab-renaming", design.Light, func(a *app) {
 			*a = *demoApp()
 			a.addTab(a.space())
@@ -131,11 +246,32 @@ func TestShots(t *testing.T) {
 			a.openEnvManager()
 		}},
 		{"settings-modal", design.Light, func(a *app) {
+			*a = *settingsDemo()
+		}},
+		{"delete-collection-confirm", design.Light, func(a *app) {
 			*a = *demoApp()
-			a.settingsOpen = true
+			a.askToDeleteCollection("collection-1")
+		}},
+		{"close-collection-confirm", design.Light, func(a *app) {
+			*a = *demoApp()
+			a.askToCloseCollection("collection-1")
+		}},
+		{"settings-dark", design.Dark, func(a *app) {
+			*a = *settingsDemo()
+		}},
+		{"settings-accent", design.Light, func(a *app) {
+			*a = *settingsDemo()
+			a.accent = "Blue"
 		}},
 	}
 	for _, shot := range shots {
+		// Each shot gets a store of its own: the demo collection lives in
+		// memory, and what a shot writes stays in its directory instead of
+		// being read back by the next one.
+		shotStore = filepath.Join(stores, shot.name)
+		if err := os.MkdirAll(shotStore, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		a := newApp()
 		a.mode = shot.mode
 		if shot.setup != nil {

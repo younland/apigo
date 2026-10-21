@@ -51,7 +51,7 @@ func TestStatusClasses(t *testing.T) {
 func TestThemeFollowsPalette(t *testing.T) {
 	for _, mode := range []Mode{Light, Dark, Black} {
 		p := PaletteOf(mode)
-		th := Theme(mode)
+		th := Theme(mode, DefaultAccent)
 		if th.Dark != p.Dark {
 			t.Errorf("%v theme Dark = %v, want %v", mode, th.Dark, p.Dark)
 		}
@@ -61,6 +61,41 @@ func TestThemeFollowsPalette(t *testing.T) {
 		if th.FontSize != FontSizeBody || th.Radius != Radius {
 			t.Errorf("%v theme font %v radius %v, want %v and %v",
 				mode, th.FontSize, th.Radius, FontSizeBody, Radius)
+		}
+		if th.Font != FontFamily {
+			t.Errorf("%v theme family %q, want the embedded %q", mode, th.Font, FontFamily)
+		}
+		if th.Accent != DefaultAccent.Base {
+			t.Errorf("%v theme accent %v, want the default %v", mode, th.Accent, DefaultAccent.Base)
+		}
+	}
+}
+
+func TestAccentNames(t *testing.T) {
+	for _, accent := range Accents {
+		if got := AccentByName(accent.Name); got != accent {
+			t.Errorf("AccentByName(%q) = %v, want %v", accent.Name, got, accent)
+		}
+	}
+	if got := AccentByName("no such color"); got != DefaultAccent {
+		t.Errorf("AccentByName of an unknown name = %v, want the default", got)
+	}
+	if Accents[0] != DefaultAccent {
+		t.Errorf("Accents[0] = %v, want the default first", Accents[0])
+	}
+}
+
+func TestWithAccentDerivesShades(t *testing.T) {
+	for _, accent := range Accents {
+		p := PaletteFor(Light, accent)
+		if p.Accent != accent.Base {
+			t.Errorf("%s accent %v, want %v", accent.Name, p.Accent, accent.Base)
+		}
+		if luminance(p.AccentHover) <= luminance(p.Accent) {
+			t.Errorf("%s hover %v is not lighter than %v", accent.Name, p.AccentHover, p.Accent)
+		}
+		if luminance(p.AccentPressed) >= luminance(p.Accent) {
+			t.Errorf("%s pressed %v is not darker than %v", accent.Name, p.AccentPressed, p.Accent)
 		}
 	}
 }

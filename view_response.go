@@ -74,7 +74,7 @@ func (a *app) responseError(c *ui.Context, p design.Palette, t *tab) {
 		ui.Icon(c, icons.Alert).FontSize(28).TextColor(p.Danger)
 		ui.Text(c, t.resp.err.Error()).FontSize(design.FontSizeBody).
 			TextColor(p.TextSecondary)
-		if ui.Button(c, "重试").Clicked() {
+		if ui.Button(c, "重试").Cursor(ui.CursorPointer).Clicked() {
 			a.send(c)
 		}
 	})

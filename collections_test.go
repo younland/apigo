@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"apigo/internal/design"
 )
 
 // TestCollectionLayoutOnDisk pins the layout every collection has on disk:
@@ -214,6 +216,65 @@ func TestEnvironmentRenameMovesFile(t *testing.T) {
 	}
 }
 
+// TestRenameCollectionMovesDirectory checks a renamed collection keeps its
+// interfaces and environments: only the directory's name changes.
+func TestRenameCollectionMovesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(dir)
+	col, err := s.newCollection("Demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.addRequest(col.ID, "", "Pets", savedRequest{
+		Kind: kindREST, Method: "GET", URL: "https://api.example.com/pets",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	renamed, err := s.renameCollection(col.ID, "订单服务")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.ID != "订单服务" || renamed.Name != "订单服务" {
+		t.Fatalf("collection %+v, want it named by its new directory", renamed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "collections", "Demo")); !os.IsNotExist(err) {
+		t.Errorf("old directory still there after the rename: %v", err)
+	}
+	base := filepath.Join(dir, "collections", "订单服务")
+	if _, err := os.Stat(filepath.Join(base, "Pets.yaml")); err != nil {
+		t.Errorf("interface did not move with the collection: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, ".env", "本地.yaml")); err != nil {
+		t.Errorf("environment did not move with the collection: %v", err)
+	}
+	if envs := s.environmentsFor(renamed.ID); len(envs) != 3 {
+		t.Errorf("environments %+v, want them following the new id", envs)
+	}
+	meta, err := os.ReadFile(filepath.Join(base, "apigo.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(meta), "name: 订单服务") {
+		t.Errorf("apigo.yaml %q, want the new name", meta)
+	}
+
+	loaded := newStore(dir)
+	if err := loaded.load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.collections) != 1 {
+		t.Fatalf("collections %+v, want the renamed one only", loaded.collections)
+	}
+	saved := loaded.collections[0]
+	if saved.Name != "订单服务" || len(saved.Root.Requests) != 1 {
+		t.Errorf("collection %+v, want the renamed one with its interface", saved)
+	}
+	if len(loaded.environmentsFor(saved.ID)) != 3 {
+		t.Errorf("environments %+v after reload, want three", loaded.environments)
+	}
+}
+
 func TestNewCollectionHasDefaultEnvironments(t *testing.T) {
 	s := newStore(t.TempDir())
 	col, err := s.newCollection("Demo")
@@ -362,5 +423,70 @@ func testApp(t *testing.T) *app {
 		Vars: []savedRow{{Enabled: true, Key: "BaseURL", Value: "https://api.example.com"}},
 	}}
 	a.openCollection("Demo")
+	// The window opens on the interface the collection holds, as a click on its
+	// tree row does: the tests below work on the request panel.
+	a.openRequest("Demo", a.store.collections[0].Root.Requests[0])
 	return a
+}
+
+// TestSettingsRoundTrip checks the appearance, accent and language survive a
+// restart.
+func TestSettingsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(dir)
+	if err := s.load(); err != nil {
+		t.Fatal(err)
+	}
+	if s.settings != (settings{}) {
+		t.Fatalf("settings %+v of a new store, want the defaults", s.settings)
+	}
+	a := newApp()
+	a.store = s
+	a.mode, a.accent, a.language = design.Dark, "Blue", "简体中文"
+	if err := a.rememberSettings(); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := newStore(dir)
+	if err := loaded.load(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newApp()
+	restarted.store = loaded
+	restarted.applySettings()
+	if restarted.mode != design.Dark {
+		t.Errorf("appearance %v after a restart, want 深色", restarted.mode)
+	}
+	if restarted.accent != "Blue" {
+		t.Errorf("accent %q after a restart, want Blue", restarted.accent)
+	}
+	if restarted.language != "简体中文" {
+		t.Errorf("language %q after a restart, want 简体中文", restarted.language)
+	}
+	if got := restarted.palette().Accent; got != design.AccentByName("Blue").Base {
+		t.Errorf("palette accent %v after a restart, want Blue", got)
+	}
+}
+
+// TestStoreDirAt checks the chosen data directory is read back from the
+// pointer file the default one keeps.
+func TestStoreDirAt(t *testing.T) {
+	base := t.TempDir()
+	if got := storeDirAt(base); got != base {
+		t.Errorf("storeDirAt of an untouched base = %q, want %q", got, base)
+	}
+	other := t.TempDir()
+	if err := rememberStoreDir(base, other); err != nil {
+		t.Fatal(err)
+	}
+	if got := storeDirAt(base); got != other {
+		t.Errorf("storeDirAt = %q, want the chosen %q", got, other)
+	}
+	var l location
+	if err := readYAML(locationPath(base), &l); err != nil {
+		t.Fatal(err)
+	}
+	if l.DataDir != other {
+		t.Errorf("location %+v, want the chosen directory", l)
+	}
 }

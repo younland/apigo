@@ -9,20 +9,17 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// requestsPanel is the left panel of a collection: its interfaces as a tree
-// of folders and requests, the search and kind filter over them, and the
-// history.
+// requestsPanel is the left panel of a collection: the search and the
+// history over its interfaces, which are a tree of folders and requests.
 func (a *app) requestsPanel(c *ui.Context, p design.Palette) {
 	col := a.activeCollection()
-	ui.Column(c).Width(design.SidebarWidth).FillHeight().Background(p.Background).Children(func() {
+	ui.Column(c).Width(design.SidebarWidth).FillHeight().Background(p.Background).
+		Label("接口面板").Children(func() {
 		ui.Row(c).Height(design.HeaderHeight).FillWidth().
 			Padding(0, design.PanelPadding).Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "接口管理").Bold().FontSize(design.FontSizeBody).TextColor(p.Text)
 			ui.TextInput(c, &a.search).Grow(1).Height(26).Placeholder("搜索接口")
 			a.panelModeButton(c, p)
 		})
-		a.divider(c, p)
-		a.requestFilters(c, p)
 		a.divider(c, p)
 		ui.Scroll(c).Grow(1).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Padding(design.RowGap, design.PanelPadding).
@@ -52,7 +49,7 @@ func (a *app) panelModeButton(c *ui.Context, p design.Palette) {
 	if a.panelMode == panelHistory {
 		icon, label = icons.Folder, "接口"
 	}
-	if ui.ButtonBase(c).Width(24).Height(24).Label(label).Children(func() {
+	if ui.ButtonBase(c).Width(24).Height(24).Label(label).Cursor(ui.CursorPointer).Children(func() {
 		ui.Icon(c, icon).FontSize(13).TextColor(p.TextMuted)
 	}).Clicked() {
 		if a.panelMode == panelHistory {
@@ -63,53 +60,25 @@ func (a *app) panelModeButton(c *ui.Context, p design.Palette) {
 	}
 }
 
-// requestFilters draws the kind filter, the folder button and the button
-// that adds an interface of a kind.
-func (a *app) requestFilters(c *ui.Context, p design.Palette) {
-	ui.Row(c).FillWidth().Padding(design.RowGap, design.PanelPadding).
-		Gap(6).AlignItems(ui.Center).Children(func() {
-		ui.Row(c).Grow(1)
-		filter := ui.ButtonBase(c).Width(26).Height(26).Label("筛选类型").Children(func() {
-			ui.Icon(c, icons.Sliders).FontSize(13).TextColor(p.TextMuted)
-		})
-		if filter.Clicked() {
-			a.filterOpen = !a.filterOpen
+// kindFilterButton picks the kind the tree lists, "" for every kind.
+func (a *app) kindFilterButton(c *ui.Context, p design.Palette) {
+	filter := ui.ButtonBase(c).Width(22).Height(22).Label("筛选类型").Cursor(ui.CursorPointer).Children(func() {
+		ui.Icon(c, icons.Sliders).FontSize(15).TextColor(p.TextMuted)
+	})
+	if filter.Clicked() {
+		a.filterOpen = !a.filterOpen
+	}
+	ui.PopoverBase(c, filter, &a.filterOpen, func(panel ui.Element) {
+		menuPanel(panel, p, 160)
+		row := menuRow(ui.ButtonBase(c).Height(28).Label("全部类型").Justify(ui.Start).
+			Padding(0, 8).Cursor(ui.CursorPointer).Children(func() {
+			ui.Text(c, "全部类型").FontSize(design.FontSizeBody).
+				TextColor(p.TextSecondary).SingleLine()
+		}), p)
+		if row.Clicked() {
+			a.kindFilter, a.filterOpen = "", false
 		}
-		ui.PopoverBase(c, filter, &a.filterOpen, func(panel ui.Element) {
-			panel.Width(160).Padding(4).Radius(design.Radius).
-				Background(p.Surface).Border(design.BorderWidth, p.Divider)
-			if ui.ButtonBase(c).Height(28).Label("全部类型").Justify(ui.Start).
-				Padding(0, 8).Children(func() {
-				ui.Text(c, "全部类型").FontSize(design.FontSizeBody).
-					TextColor(p.TextSecondary).SingleLine()
-			}).Clicked() {
-				a.kindFilter, a.filterOpen = "", false
-			}
-			a.kindMenu(c, p, func(k kind) { a.kindFilter, a.filterOpen = k, false })
-		})
-		if ui.ButtonBase(c).Width(26).Height(26).Label("新建文件夹").Children(func() {
-			ui.Icon(c, icons.Folder).FontSize(13).TextColor(p.TextMuted)
-		}).Clicked() {
-			if err := a.newFolder(); err != nil {
-				c.Toast("新建文件夹失败：" + err.Error())
-			}
-		}
-		add := ui.ButtonBase(c).Width(26).Height(26).Label("新建接口").Children(func() {
-			ui.Icon(c, icons.Plus).FontSize(14).TextColor(p.Accent)
-		})
-		if add.Clicked() {
-			a.kindMenuOpen = !a.kindMenuOpen
-		}
-		ui.PopoverBase(c, add, &a.kindMenuOpen, func(panel ui.Element) {
-			panel.Width(160).Padding(4).Radius(design.Radius).
-				Background(p.Surface).Border(design.BorderWidth, p.Divider)
-			a.kindMenu(c, p, func(k kind) {
-				a.kindMenuOpen = false
-				if err := a.addRequest(k, ""); err != nil {
-					c.Toast(err.Error())
-				}
-			})
-		})
+		a.kindMenu(c, p, func(k kind) { a.kindFilter, a.filterOpen = k, false })
 	})
 }
 
@@ -123,28 +92,54 @@ func (a *app) requestTree(c *ui.Context, p design.Palette, col collection) {
 // folders inside it first, then its requests.
 func (a *app) folderRow(c *ui.Context, p design.Palette, col collection, f folder, depth int) {
 	open := !a.foldersClosed[f.Path]
+	menu := a.menuFlag("folder-menu/" + f.Path)
 	ui.Column(c).FillWidth().Gap(2).Children(func() {
-		ui.Row(c).Height(28).FillWidth().Padding(0, 0, 0, depthIndent(depth)).
-			AlignItems(ui.Center).Gap(6).Children(func() {
-			chevron := ui.Icon(c, icons.Chevron).FontSize(11).TextColor(p.TextMuted)
-			if !open {
-				chevron.Rotate(-90)
-			}
-			ui.Icon(c, icons.Folder).FontSize(13).TextColor(p.TextSecondary)
-			if ui.ButtonBase(c).Grow(1).Height(28).Label("文件夹 " + f.Name).
-				Justify(ui.Start).Gap(6).Children(func() {
+		row := ui.Row(c).Height(28).FillWidth().Padding(0, 0, 0, depthIndent(depth)).
+			Radius(design.Radius).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer)
+		row.Children(func() {
+			// The whole row is the button: every part of it folds the folder,
+			// and the + keeps its own clicks.
+			body := ui.ButtonBase(c).Grow(1).Height(28).Label("文件夹 " + f.Name).
+				Justify(ui.Start).Gap(4).Cursor(ui.CursorPointer)
+			body.Children(func() {
+				chevron := ui.Icon(c, icons.Chevron).FontSize(11).TextColor(p.TextMuted)
+				if !open {
+					chevron.Rotate(-90)
+				}
+				ui.Icon(c, icons.Folder).FontSize(13).TextColor(p.TextSecondary)
 				ui.Text(c, f.Name).FontSize(design.FontSizeBody).
 					TextColor(p.TextSecondary).SingleLine()
 				ui.Textf(c, "%d", countRequests(f)).FontSize(design.FontSizeTiny).
 					TextColor(p.TextMuted)
-			}).Clicked() {
+			})
+			if body.Clicked() {
 				if a.foldersClosed == nil {
 					a.foldersClosed = map[string]bool{}
 				}
 				a.foldersClosed[f.Path] = open
 			}
-			a.folderAddButton(c, p, f)
+			// The buttons at the row's end sit close together: three icons a gap
+			// apart read as three separate things.
+			ui.Row(c).Gap(2).AlignItems(ui.Center).Children(func() {
+				if depth == 0 {
+					a.kindFilterButton(c, p)
+				}
+				a.folderAddButton(c, p, f)
+				// The 根目录 is the collection's own directory: nothing renames,
+				// moves or deletes it, so it has no menu to open.
+				if f.Path == "" {
+					return
+				}
+				more := moreButton(c, p, "文件夹操作 "+f.Name)
+				if more.Clicked() {
+					*menu = !*menu
+				}
+				a.popoverMenu(c, p, more, menu, 160, a.folderActions(f))
+			})
 		})
+		if row.Hovered() {
+			row.Background(p.SurfaceHover)
+		}
 		if !open {
 			return
 		}
@@ -173,19 +168,30 @@ func (a *app) emptyTreeHint(c *ui.Context, p design.Palette, depth int) {
 // depthIndent is how far one level of the tree moves a row right.
 func depthIndent(depth int) float32 { return float32(depth) * design.PanelPadding }
 
-// folderAddButton adds an interface of a kind inside a folder.
+// folderAddButton opens a folder's add menu: a subfolder of its own, or an
+// interface of a kind inside it.
 func (a *app) folderAddButton(c *ui.Context, p design.Palette, f folder) {
-	open := a.folderMenuFlag(f.Path)
-	add := ui.ButtonBase(c).Width(20).Height(20).Label("在" + f.Name + "里新建接口").
-		Children(func() {
-			ui.Icon(c, icons.Plus).FontSize(11).TextColor(p.TextMuted)
-		})
+	open := a.menuFlag("folder/" + f.Path)
+	add := ui.ButtonBase(c).Width(18).Height(18).Label("在" + f.Name + "里新建接口").
+		Cursor(ui.CursorPointer).Children(func() {
+		ui.Icon(c, icons.Plus).FontSize(12).TextColor(p.TextMuted)
+	})
 	if add.Clicked() {
 		*open = !*open
 	}
 	ui.PopoverBase(c, add, open, func(panel ui.Element) {
-		panel.Width(160).Padding(4).Radius(design.Radius).
-			Background(p.Surface).Border(design.BorderWidth, p.Divider)
+		menuPanel(panel, p, 160)
+		row := menuRow(ui.ButtonBase(c).Height(28).Label("在"+f.Name+"里新建文件夹").Justify(ui.Start).
+			Padding(0, 8).Gap(8).Cursor(ui.CursorPointer).Children(func() {
+			ui.Icon(c, icons.Folder).FontSize(13).TextColor(p.TextMuted)
+			ui.Text(c, "新建文件夹").FontSize(design.FontSizeBody).
+				TextColor(p.TextSecondary).SingleLine()
+		}), p)
+		if row.Clicked() {
+			*open = false
+			a.askNewFolder(f.Path)
+		}
+		ui.Row(c).Height(design.BorderWidth).FillWidth().Background(p.Divider)
 		a.kindMenu(c, p, func(k kind) {
 			*open = false
 			if err := a.addRequest(k, f.Path); err != nil {
@@ -193,19 +199,6 @@ func (a *app) folderAddButton(c *ui.Context, p design.Palette, f folder) {
 			}
 		})
 	})
-}
-
-// folderMenuFlag is the open state of a folder's add menu.
-func (a *app) folderMenuFlag(id string) *bool {
-	if a.folderMenus == nil {
-		a.folderMenus = map[string]*bool{}
-	}
-	flag := a.folderMenus[id]
-	if flag == nil {
-		flag = new(bool)
-		a.folderMenus[id] = flag
-	}
-	return flag
 }
 
 // matchesFilter reports whether a request passes the search and the kind.
@@ -221,24 +214,77 @@ func (a *app) matchesFilter(req savedRequest) bool {
 }
 
 // requestLineRow is one clickable request of the tree: its kind, method and
-// name, indented under the folder it is in.
+// name, indented under the folder it is in, with the menu a right click opens.
+// The one a tab shows is tinted with the accent; any row tints under the
+// pointer.
 func (a *app) requestLineRow(c *ui.Context, p design.Palette, col collection, req savedRequest, depth int) {
 	label, color := req.Method, p.Method(req.Method)
 	if req.Kind != kindREST {
 		label, color = kindName(req.Kind), p.TextMuted
 	}
-	ui.Row(c).Height(26).FillWidth().Padding(0, 0, 0, depthIndent(depth)).
-		AlignItems(ui.Center).Gap(6).Children(func() {
-		ui.Icon(c, kindIcon(req.Kind)).FontSize(11).TextColor(color)
-		ui.Text(c, label).Bold().FontSize(design.FontSizeTiny).TextColor(color).SingleLine()
-		if ui.ButtonBase(c).Grow(1).Height(26).Label("请求 " + req.Name).
-			Justify(ui.Start).Children(func() {
-			ui.Text(c, req.Name).FontSize(design.FontSizeBody).
-				TextColor(p.TextSecondary).SingleLine()
-		}).Clicked() {
+	opened := a.activeShows(req.Path)
+	name, bg := p.TextSecondary, ui.Color{}
+	if opened {
+		name, bg = p.Accent, p.Accent.Alpha(accentTint)
+	}
+	menu := a.menuFlag("request-menu/" + req.Path)
+	row := ui.Row(c).Height(26).FillWidth().Padding(0, 0, 0, depthIndent(depth)).
+		Radius(design.Radius).AlignItems(ui.Center).Gap(6).Background(bg).
+		Cursor(ui.CursorPointer)
+	row.Children(func() {
+		// The whole row is the button: its kind, method and name all open it.
+		body := ui.ButtonBase(c).Grow(1).Height(26).Label("请求 " + req.Name).
+			Justify(ui.Start).Gap(6).Cursor(ui.CursorPointer)
+		body.Children(func() {
+			ui.Icon(c, kindIcon(req.Kind)).FontSize(11).TextColor(color)
+			ui.Text(c, label).Bold().FontSize(design.FontSizeTiny).TextColor(color).SingleLine()
+			ui.Text(c, req.Name).FontSize(design.FontSizeBody).TextColor(name).SingleLine()
+		})
+		if body.Clicked() {
 			a.openRequest(col.ID, req)
 		}
+		more := moreButton(c, p, "接口操作 "+req.Name)
+		if more.Clicked() {
+			*menu = !*menu
+		}
+		a.popoverMenu(c, p, more, menu, 170, []menuAction{
+			{icon: icons.Pencil, text: "重命名", run: func() { a.askRenameRequest(req.Path) }},
+			{icon: icons.Copy, text: "复制接口", run: func() { a.duplicateRequest(c, req.Path) }},
+			{icon: icons.Folder, text: "移动接口", run: func() { a.askToMoveRequest(req.Path) }},
+			menuRule(),
+			{icon: icons.Trash, text: "删除接口", danger: true, run: func() {
+				a.askToDeleteRequest(req.Path)
+			}},
+		})
 	})
+	if !opened && row.Hovered() {
+		row.Background(p.SurfaceHover)
+	}
+}
+
+// moreButton is the "⋮" a row of the tree opens its menu with, standing on its
+// end as the rows stack, and kept after the row's +.
+func moreButton(c *ui.Context, p design.Palette, label string) ui.Element {
+	return ui.ButtonBase(c).Width(18).Height(18).Label(label).Cursor(ui.CursorPointer).
+		Children(func() {
+			ui.Icon(c, icons.MoreVertical).FontSize(13).TextColor(p.TextMuted)
+		})
+}
+
+// folderActions are the lines of a folder's menu: its name, where it goes, and
+// deleting it with everything it holds.
+func (a *app) folderActions(f folder) []menuAction {
+	if f.Path == "" {
+		return nil // the 根目录 is the collection's own directory
+	}
+	return []menuAction{
+		{icon: icons.Pencil, text: "重命名", run: func() { a.askRenameFolder(f.Path) }},
+		{icon: icons.Folder, text: "移动文件夹", run: func() { a.askToMoveFolder(f.Path) }},
+		menuRule(),
+		{icon: icons.Trash, text: "删除文件夹", danger: true, run: func() {
+			a.askToDeleteFolder(f.Path)
+		}},
+	}
 }
 
 // historyPanel lists the sent requests, newest first; a click opens one.
@@ -257,7 +303,7 @@ func (a *app) historyRow(c *ui.Context, p design.Palette, entry historyEntry) {
 		ui.Text(c, entry.Method).Bold().FontSize(design.FontSizeTiny).
 			TextColor(p.Method(entry.Method)).SingleLine()
 		if ui.ButtonBase(c).Grow(1).Height(26).Label("历史 " + entry.URL).
-			Justify(ui.Start).Children(func() {
+			Justify(ui.Start).Cursor(ui.CursorPointer).Children(func() {
 			ui.Text(c, entry.URL).FontSize(design.FontSizeBody).
 				TextColor(p.TextSecondary).SingleLine()
 		}).Clicked() {
