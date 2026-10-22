@@ -36,8 +36,17 @@ const watchDebounce = 150 * time.Millisecond
 
 // followFiles starts the watch of the open collection's directory, and stops
 // the watch of the one the window left: the tree follows what another program
-// does to the files, without a frame that goes looking.
+// does to the files, without a frame that goes looking. It also watches the
+// directory the collections live in, so the list knows which of them another
+// program deleted.
 func (a *app) followFiles() {
+	a.followList()
+	a.followWindow()
+}
+
+// followWindow keeps the watch on the collection the window shows, and drops
+// the one of a collection it left.
+func (a *app) followWindow() {
 	if a.active == a.watched {
 		return
 	}
@@ -47,6 +56,64 @@ func (a *app) followFiles() {
 	}
 	a.startWatch(a.active)
 }
+
+// followList watches the directory the collections are kept in, so one another
+// program deletes is marked on the list without a frame that goes looking. It
+// is tried once: a directory the platform cannot watch is not tried again every
+// frame.
+func (a *app) followList() {
+	if a.listWatched || a.watch == nil {
+		return
+	}
+	a.listWatched = true
+	dir := a.store.CollectionsDir()
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return // nothing on disk to watch: the list keeps what it holds
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	events, err := a.watch(ctx, dir, mygo.FileWatchOptions{Debounce: watchDebounce})
+	if err != nil {
+		cancel()
+		return
+	}
+	a.listWatchStop = func() {
+		cancel()
+		_ = events.Close()
+	}
+	go a.drainList(ctx, events)
+}
+
+// drainList marks the collections that lost their directory, on the window's
+// thread: the list is built there.
+func (a *app) drainList(ctx context.Context, events fileEvents) {
+	for {
+		if _, err := events.Next(ctx); err != nil {
+			return // the watch ended: the app quits
+		}
+		run := func() { a.refreshMissing() }
+		if a.after == nil {
+			run()
+			continue
+		}
+		a.after(run)
+	}
+}
+
+// refreshMissing records which collections have lost their directory. The list
+// greys them out, and asks to take them off rather than opening what is not
+// there.
+func (a *app) refreshMissing() {
+	missing := map[string]bool{}
+	for _, col := range a.store.Collections {
+		if info, err := os.Stat(a.store.CollectionDir(col.ID)); err != nil || !info.IsDir() {
+			missing[col.ID] = true
+		}
+	}
+	a.missing = missing
+}
+
+// collectionMissing reports whether a collection's directory is gone.
+func (a *app) collectionMissing(id string) bool { return a.missing[id] }
 
 // startWatch watches a collection's directory.
 func (a *app) startWatch(id string) {

@@ -1,5 +1,5 @@
 // Package design holds the colors, metrics and type sizes sampled from
-// Hoppscotch's themes, so apigo's screens can be matched against it.
+// Hoppscotch's themes, so ApiGo's screens can be matched against it.
 package design
 
 import "github.com/egoist/mygo/ui"
@@ -11,7 +11,7 @@ const (
 	SidenavWidth     float32 = 56
 	WorkspacePadding float32 = 12
 	FooterHeight     float32 = 32
-	SidebarWidth     float32 = 240
+	SidebarWidth     float32 = 264
 	MethodWidth      float32 = 104
 	RequestRowHeight float32 = 40
 	PanelPadding     float32 = 16
@@ -29,13 +29,15 @@ const (
 	RequestTabMaxWidth float32 = 260
 )
 
-// Type sizes, in DIPs. Hoppscotch sets body text at 12px on a 16px line.
+// Type sizes, in DIPs. Hoppscotch sets body text at 12px on a 16px line; the
+// app draws one step up: the embedded font has thinner ink than the system's at
+// the same size, which read too light at 12.
 const (
-	FontSizeBody    float32 = 12
-	FontSizeTiny    float32 = 10
-	FontSizeTitle   float32 = 14
-	FontSizeDisplay float32 = 18
-	LineHeight      float32 = 16
+	FontSizeBody    float32 = 13
+	FontSizeTiny    float32 = 11
+	FontSizeTitle   float32 = 15
+	FontSizeDisplay float32 = 19
+	LineHeight      float32 = 17
 )
 
 // FontFamily is the family the app draws with: the embedded interface font

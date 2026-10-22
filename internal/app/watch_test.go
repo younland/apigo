@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -206,5 +207,40 @@ func TestWatchSkipsCollectionDirs(t *testing.T) {
 		if got := reservedInCollection(tc.path, tc.isDir); got != tc.want {
 			t.Errorf("reservedInCollection(%q, %v) = %v, want %v", tc.path, tc.isDir, got, tc.want)
 		}
+	}
+}
+
+// TestWatchMarksDeletedCollections checks the home window watches the directory
+// the collections live in, and marks a collection another program deleted before
+// a frame goes looking.
+func TestWatchMarksDeletedCollections(t *testing.T) {
+	a, log, pending := watchApp(t)
+	a.openHome()
+	kk := a.store.Collections[0]
+
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame() // the first frame starts the watches
+	list := log.last(t)
+	if want := a.store.CollectionsDir(); list.path != want {
+		t.Fatalf("watched %q in the home window, want the collections directory %q",
+			list.path, want)
+	}
+	if a.collectionMissing(kk.ID) {
+		t.Fatal("a collection that is still on disk is marked missing")
+	}
+
+	// Another program deletes a collection's directory, and the watch says so.
+	if err := os.RemoveAll(a.store.CollectionDir(kk.ID)); err != nil {
+		t.Fatal(err)
+	}
+	list.report(t, mygo.FileRemove, kk.ID)
+	applyWatch(t, pending)
+
+	if !a.collectionMissing(kk.ID) {
+		t.Error("the collection whose directory went away is not marked missing")
+	}
+	tt.Frame()
+	if !tt.HasText("打开 " + kk.Name) {
+		t.Errorf("texts %q, want the collection still on the list, marked", tt.Texts())
 	}
 }

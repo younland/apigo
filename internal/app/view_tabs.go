@@ -26,7 +26,11 @@ func (a *app) requestTabs(c *ui.Context, p design.Palette, ws *workspace) {
 				a.newTabButton(c, p, ws)
 			})
 		})
-		a.environmentPicker(c, p)
+		// The picker is one row of its own, so it centers in the strip while
+		// the tabs stay flush with the top.
+		ui.Row(c).Height(design.TabStripHeight).AlignItems(ui.Center).Children(func() {
+			a.environmentPicker(c, p)
+		})
 	})
 }
 
@@ -94,8 +98,7 @@ func (a *app) tabContent(c *ui.Context, p design.Palette, ws *workspace, t *tab,
 	if t.renaming {
 		ui.Row(c).Height(design.TabStripHeight-2).Padding(0, 10).Gap(6).
 			AlignItems(ui.Center).Children(func() {
-			ui.Text(c, t.method).Bold().FontSize(design.FontSizeTiny).
-				TextColor(p.Method(t.method)).SingleLine()
+			a.tabBadge(c, p, t)
 			a.renameField(c, p, t)
 		})
 		return
@@ -112,8 +115,7 @@ func (a *app) tabContent(c *ui.Context, p design.Palette, ws *workspace, t *tab,
 		Padding(0, 14).Gap(6).MinWidth(max(design.TabMinWidth, chrome+textWidth(c, label)+tabWiggle)).
 		Label("标签页 " + t.title).Cursor(ui.CursorPointer)
 	body.Children(func() {
-		ui.Text(c, t.method).Bold().FontSize(design.FontSizeTiny).
-			TextColor(p.Method(t.method)).SingleLine()
+		a.tabBadge(c, p, t)
 		ui.Text(c, label).FontSize(design.FontSizeBody).TextColor(color).SingleLine().
 			MinWidth(textWidth(c, label) + tabWiggle)
 		// The dot says the request is not on disk: a new tab, or one edited
@@ -166,14 +168,25 @@ func (a *app) renameField(c *ui.Context, p design.Palette, t *tab) {
 	}
 }
 
-// newTabButton is the "+" that opens a request tab.
+// newTabButton is the "+" that opens a request tab: it asks which kind of
+// request the tab holds, as the tree's + asks before adding an interface. A
+// folder has no place in a strip of tabs, so its menu stops at the kinds.
 func (a *app) newTabButton(c *ui.Context, p design.Palette, ws *workspace) {
-	if ui.ButtonBase(c).Width(32).Height(design.TabStripHeight).Label("新建标签页").
+	open := a.menuFlag("new-tab")
+	button := ui.ButtonBase(c).Width(32).Height(design.TabStripHeight).Label("新建标签页").
 		Cursor(ui.CursorPointer).Children(func() {
 		ui.Icon(c, icons.Plus).FontSize(14).TextColor(p.TextMuted)
-	}).Clicked() {
-		a.addTab(ws)
+	})
+	if button.Clicked() {
+		*open = !*open
 	}
+	ui.PopoverBase(c, button, open, func(panel ui.Element) {
+		menuPanel(panel, p, 160)
+		a.kindMenu(c, p, "新建 ", func(k kind) {
+			*open = false
+			a.addTabOfKind(ws, k)
+		})
+	})
 }
 
 // environmentPicker lists the active collection's environments and opens
@@ -185,17 +198,7 @@ func (a *app) environmentPicker(c *ui.Context, p design.Palette) {
 	if env := a.activeEnvironment(); env != nil {
 		label = env.Name
 	}
-	btn := ui.ButtonBase(c).Width(120).Height(design.TabStripHeight-12).Padding(0, 10).
-		MinWidth(0).Background(p.Surface).Radius(design.Radius).
-		Border(design.BorderWidth, p.Border).Justify(ui.SpaceBetween).
-		Label("环境：" + label).Cursor(ui.CursorPointer)
-	if btn.Hovered() {
-		btn.Background(p.SurfaceHover)
-	}
-	btn.Children(func() {
-		ui.Text(c, label).FontSize(design.FontSizeBody).TextColor(p.TextSecondary).SingleLine()
-		ui.Icon(c, icons.Chevron).FontSize(12).TextColor(p.TextMuted)
-	})
+	btn := selectTrigger(c, p, selectSpec{name: "环境：" + label, label: label, width: 120})
 	if btn.Clicked() {
 		a.envMenuOpen = !a.envMenuOpen
 	}
@@ -203,28 +206,15 @@ func (a *app) environmentPicker(c *ui.Context, p design.Palette) {
 		menuPanel(panel, p, 180)
 		envs := a.collectionEnvironments()
 		for _, env := range envs {
-			row := menuRow(ui.ButtonBase(c).Height(28).Label("切换到 "+env.Name).Justify(ui.Start).
-				Gap(8).Padding(0, 8).Cursor(ui.CursorPointer).Children(func() {
-				text := p.TextSecondary
-				if env.Active {
-					// The one requests send with is ticked and reads in the
-					// accent; the others keep its room, so names line up.
-					ui.Icon(c, icons.Check).FontSize(12).TextColor(p.Accent)
-					text = p.Accent
-				} else {
-					ui.Row(c).Width(12)
-				}
-				ui.Text(c, env.Name).FontSize(design.FontSizeBody).TextColor(text).SingleLine()
-			}), p)
-			if env.Active {
-				row.Background(p.Accent.Alpha(accentTint))
-			}
-			if row.Clicked() {
-				a.envMenuOpen = false
-				if err := a.store.ActivateEnvironment(env.ID); err != nil {
-					c.Toast("激活环境失败：" + err.Error())
-				}
-			}
+			selectChoiceRow(c, p, selectChoice{
+				name: "切换到 " + env.Name, label: env.Name, chosen: env.Active,
+				run: func() {
+					a.envMenuOpen = false
+					if err := a.store.ActivateEnvironment(env.ID); err != nil {
+						c.Toast("激活环境失败：" + err.Error())
+					}
+				},
+			})
 		}
 		if len(envs) == 0 {
 			ui.Text(c, "还没有环境").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
@@ -246,14 +236,39 @@ func (a *app) environmentPicker(c *ui.Context, p design.Palette) {
 // so a title that just fits is not ellipsized to 「PO…」.
 const tabWiggle float32 = 2
 
+// tabKindIcon is the size of the icon a tab of another kind shows where a REST
+// tab shows its method: a socket has no method to name.
+const tabKindIcon float32 = 12
+
+// tabBadgeWidth is how wide the piece before a tab's title draws: the method of
+// a REST request, the icon of the kind of any other.
+func tabBadgeWidth(c *ui.Context, t *tab) float32 {
+	if t.kind == kindREST {
+		return measureText(c, t.method, design.FontSizeTiny, 700)
+	}
+	return tabKindIcon
+}
+
+// tabBadge draws what stands before a tab's title: the method of a REST
+// request, or the icon of the kind a socket is.
+func (a *app) tabBadge(c *ui.Context, p design.Palette, t *tab) {
+	if t.kind != kindREST {
+		ui.Icon(c, kindIcon(t.kind)).FontSize(tabKindIcon).TextColor(p.TextMuted)
+		return
+	}
+	ui.Text(c, t.method).Bold().FontSize(design.FontSizeTiny).
+		TextColor(p.Method(t.method)).SingleLine()
+}
+
 // requestTabChrome is how wide a request tab draws beside its title: both
-// paddings, the method, the gap after each piece, the edit dot and the cross.
+// paddings, the method or kind icon, the gap after each piece, the edit dot and
+// the cross.
 func requestTabChrome(c *ui.Context, t *tab, active bool) float32 {
 	const (
 		pad, gap   = 14 + 14, 6
 		dot, cross = 6, 20
 	)
-	chrome := pad + measureText(c, t.method, design.FontSizeTiny, 700) + gap
+	chrome := pad + tabBadgeWidth(c, t) + gap
 	if t.unsaved() {
 		chrome += gap + dot
 	}

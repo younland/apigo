@@ -44,6 +44,8 @@ type Request struct {
 	Body     string `yaml:"body,omitempty"`
 	// Form holds the rows of form-data and x-www-form-urlencoded bodies.
 	Form []Row `yaml:"form,omitempty"`
+	// Protocol is the subprotocol a WebSocket request asks the server for.
+	Protocol string `yaml:"protocol,omitempty"`
 }
 
 // folder is one directory of a collection's tree: a folder of the tree, or
@@ -78,12 +80,11 @@ const MetaFile = "apigo.yaml"
 const RootFolderName = "根目录"
 
 // Store keeps one directory per collection, plus the environments that apply
-// to every collection and the history, under Dir.
+// to every collection, under Dir.
 type Store struct {
 	Dir          string
 	Collections  []Collection
 	Environments []Environment
-	History      []HistoryEntry
 	Settings     Settings
 	// hidden are the collections taken off the list, whose directories stay.
 	hidden []string
@@ -106,6 +107,10 @@ func DefaultDir() string {
 
 func (s *Store) collectionsDir() string { return filepath.Join(s.Dir, "collections") }
 
+// CollectionsDir is the directory the collections are kept in, one directory
+// each: watching it tells the list what another program does to them.
+func (s *Store) CollectionsDir() string { return s.collectionsDir() }
+
 // collectionDir is the directory a collection is kept in.
 func (s *Store) CollectionDir(id string) string {
 	return filepath.Join(s.collectionsDir(), id)
@@ -116,8 +121,8 @@ func (s *Store) staticDir(id string) string {
 	return filepath.Join(s.CollectionDir(id), "static")
 }
 
-// load reads every collection directory, the global environments and the
-// history, treating missing ones as empty. The collections taken off the list
+// load reads every collection directory and the global environments,
+// treating missing ones as empty. The collections taken off the list
 // stay on disk and are left out here.
 func (s *Store) Load() error {
 	entries, err := os.ReadDir(s.collectionsDir())
@@ -142,10 +147,7 @@ func (s *Store) Load() error {
 	if err := s.loadGlobalEnvironments(); err != nil {
 		return err
 	}
-	if err := s.loadSettings(); err != nil {
-		return err
-	}
-	return readYAMLIfExists(filepath.Join(s.Dir, "history.yaml"), &s.History)
+	return s.loadSettings()
 }
 
 // readCollection reads one collection directory: apigo.yaml, the tree of

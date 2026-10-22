@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"apigo/internal/design"
 	"apigo/internal/store"
 	"apigo/internal/widgets"
 
@@ -190,6 +191,33 @@ func TestBodyPaneOffersTheFormats(t *testing.T) {
 	}
 	if !tt.HasText("该请求不发送请求体") || tt.HasText("application/json") {
 		t.Errorf("texts %q, want the empty body of none and no Content-Type", tt.Texts())
+	}
+}
+
+// TestBodyFormatPillsShowTheirLabels checks no pill is squeezed to the width of
+// its label alone, which the toolkit rounds down and ellipsizes: the shortest
+// labels, XML among them, were the first to read 「X…」 once the type grew.
+func TestBodyFormatPillsShowTheirLabels(t *testing.T) {
+	a := testApp(t)
+	a.current().reqTab = 2
+	a.current().bodyType = "json"
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	for _, format := range bodyFormats {
+		rect, ok := tt.Find("请求体格式 " + format.Label)
+		if !ok {
+			t.Fatalf("no pill for %q", format.Label)
+		}
+		// What the label needs, as the text engine advances it.
+		var advance float32
+		font := ui.Font{Family: design.FontFamily, Size: design.FontSizeBody, Weight: 400}
+		for _, glyph := range ui.Shape(format.Label, font) {
+			advance += glyph.Advance
+		}
+		if room := rect.W - 2*bodyPillPadding; room <= advance {
+			t.Errorf("the %q pill leaves %.2f for a label that takes %.2f: it would read with an ellipsis",
+				format.Label, room, advance)
+		}
 	}
 }
 

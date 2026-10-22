@@ -27,7 +27,7 @@ func TestHomeListsCollections(t *testing.T) {
 	a.store.Collections = []collection{{ID: "Demo", Name: "Demo"}}
 	tt := ui.NewTester(a.view, 1280, 800)
 
-	if !tt.HasText("Demo") || !tt.HasText("HTTP") || !tt.HasText("0 个接口") {
+	if !tt.HasText("Demo") || !tt.HasText("0 个接口") {
 		t.Errorf("texts %q, want the collection row of the home window", tt.Texts())
 	}
 	if !tt.HasText("导入集合") || !tt.HasText("新建集合") || tt.HasText("新建项目") {
@@ -130,7 +130,7 @@ func TestRequestTabs(t *testing.T) {
 			t.Errorf("%q is in the tab strip, want the panes with nothing behind them hidden", hidden)
 		}
 	}
-	if err := tt.Click("Body"); err != nil {
+	if err := tt.Click("请求体"); err != nil {
 		t.Fatal(err)
 	}
 	if a.current().bodyType != "json" || !tt.HasText("美化请求体") {
@@ -163,9 +163,7 @@ func TestTabsKeepTheirOwnRequests(t *testing.T) {
 	tt := ui.NewTester(a.view, 1280, 800)
 
 	a.current().url = "https://one.example"
-	if err := tt.Click("新建标签页"); err != nil {
-		t.Fatal(err)
-	}
+	newTabThroughTheStrip(t, tt, "REST")
 	if len(ws.tabs) != 2 || ws.active != 1 {
 		t.Fatalf("tabs %d active %d after the new tab, want 2 tabs with the second active",
 			len(ws.tabs), ws.active)
@@ -292,8 +290,14 @@ func TestNewRequestAddsToCollection(t *testing.T) {
 	if got := a.current().kind; got != kindWebSocket {
 		t.Errorf("tab kind %q, want websocket", got)
 	}
-	if !tt.HasText("WebSocket 请求尚未实现") {
-		t.Errorf("texts %q, want the placeholder of the unimplemented kind", tt.Texts())
+	// A socket opens its own pane: the address, the panes, and the log.
+	for _, want := range []string{"通讯", "协议", "信息", "日志"} {
+		if !tt.HasText(want) {
+			t.Errorf("texts %q, want %q in the socket pane", tt.Texts(), want)
+		}
+	}
+	if _, ok := tt.Find("连接"); !ok {
+		t.Error("the socket pane has no connect button")
 	}
 	if !a.current().unsaved() {
 		t.Error("a new request is on disk already, want it a draft until Ctrl+S")
@@ -316,7 +320,7 @@ func TestNewRequestAddsToCollection(t *testing.T) {
 	}
 	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("订阅设备")
-	if err := tt.Click("保存"); err != nil {
+	if err := tt.Click("确认保存"); err != nil {
 		t.Fatal(err)
 	}
 	col := a.store.Collections[0]
@@ -367,34 +371,6 @@ func TestSaveCurrentRequestToCollection(t *testing.T) {
 	}
 	if got := a.current().title; got != "新建宠物" {
 		t.Errorf("tab title %q, want the name the interface file kept", got)
-	}
-}
-
-func TestHistoryRecordedAfterSend(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, `{"ok":true}`)
-	}))
-	defer server.Close()
-
-	a := testApp(t)
-	a.current().url = server.URL
-	tt := ui.NewTester(a.view, 1280, 800)
-	if err := tt.Click("发送"); err != nil {
-		t.Fatal(err)
-	}
-	if len(a.store.History) != 1 {
-		t.Fatalf("history %+v, want one entry", a.store.History)
-	}
-	if got := a.store.History[0].Status; got != http.StatusOK {
-		t.Errorf("status %d, want 200", got)
-	}
-	loaded := store.New(a.store.Dir)
-	if err := loaded.Load(); err != nil {
-		t.Fatal(err)
-	}
-	if len(loaded.History) != 1 || loaded.History[0].URL != server.URL {
-		t.Errorf("history %+v, want the entry on disk", loaded.History)
 	}
 }
 
@@ -572,7 +548,8 @@ func TestSettingsModal(t *testing.T) {
 		t.Fatal("settings closed after the sun button")
 	}
 	for _, want := range []string{"通用", "语言", "简体中文", "主题", "背景", "强调色",
-		"系统（亮色）", "数据目录", "更换目录", "打开目录", "版本"} {
+		"系统（亮色）", "数据目录", "更换目录", "打开目录", "版本",
+		"响应体上限（MB）", "响应体超过上限会被截断，默认 100 MB"} {
 		if !tt.HasText(want) {
 			t.Errorf("texts %q, want %q in the settings", tt.Texts(), want)
 		}
@@ -689,7 +666,7 @@ func TestChooseDataDirCancelled(t *testing.T) {
 
 func TestResponseRenderedAsReadOnlyJSON(t *testing.T) {
 	a := testApp(t)
-	a.apply(a.current(), &response{
+	a.showResponse(a.current(), &response{
 		Status:     http.StatusOK,
 		Headers:    http.Header{"Content-Type": {"application/json; charset=utf-8"}},
 		Body:       `{"data":[]}`,
@@ -712,7 +689,7 @@ func TestResponseRenderedAsReadOnlyJSON(t *testing.T) {
 // server sent it, without JSON highlighting.
 func TestResponseTextIsLeftAsSent(t *testing.T) {
 	a := testApp(t)
-	a.apply(a.current(), &response{
+	a.showResponse(a.current(), &response{
 		Status:  http.StatusOK,
 		Headers: http.Header{"Content-Type": {"text/plain"}},
 		Body:    "hello {not json}",
@@ -1086,7 +1063,7 @@ func TestFolderTreeAddsAndNavigates(t *testing.T) {
 	}
 	// The + stood on the folder, which is where Ctrl+S saves it.
 	tt.Key(ui.Cmd, ui.KeyS)
-	if err := tt.Click("保存"); err != nil {
+	if err := tt.Click("确认保存"); err != nil {
 		t.Fatal(err)
 	}
 	col = a.store.Collections[0]
@@ -1131,7 +1108,7 @@ func TestNewInterfaceWritesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.KeyS)
-	if err := tt.Click("保存"); err != nil {
+	if err := tt.Click("确认保存"); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(a.store.CollectionDir("Demo"), "Untitled.yaml")
@@ -1145,7 +1122,7 @@ func TestNewInterfaceWritesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Key(ui.Cmd, ui.KeyS)
-	if err := tt.Click("保存"); err != nil {
+	if err := tt.Click("确认保存"); err != nil {
 		t.Fatal(err)
 	}
 	second := filepath.Join(a.store.CollectionDir("Demo"), "Untitled 2.yaml")
@@ -1164,9 +1141,7 @@ func TestTabSwitchWritesInterfaceFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.current().url = "https://api.example.com/pets/2"
-	if err := tt.Click("新建标签页"); err != nil {
-		t.Fatal(err)
-	}
+	newTabThroughTheStrip(t, tt, "REST")
 	path := filepath.Join(a.store.CollectionDir("Demo"), "Pets.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1217,9 +1192,7 @@ func TestFailedInterfaceSaveIsReported(t *testing.T) {
 	// The interface the tab came from is gone, as editing the tree by hand
 	// can leave it.
 	a.store.Collections[0].Root.Requests = nil
-	if err := tt.Click("新建标签页"); err != nil {
-		t.Fatal(err)
-	}
+	newTabThroughTheStrip(t, tt, "REST")
 	tt.Frame()
 	if !tt.HasText("接口保存失败：没有接口 \"Pets\"") {
 		t.Errorf("texts %q, want the failed write reported", tt.Texts())
@@ -1270,5 +1243,60 @@ func TestDeleteCollectionWhileListBuilds(t *testing.T) {
 	tt.Frame()
 	if len(a.store.Collections) != 1 || a.store.Collections[0].Name != "B" {
 		t.Errorf("collections %+v, want only B left", a.store.Collections)
+	}
+}
+
+// newTabThroughTheStrip opens a tab of a kind the way a reader does: the strip's
+// +, then the kind its menu offers.
+func newTabThroughTheStrip(t *testing.T, tt *ui.Tester, kindName string) {
+	t.Helper()
+	if err := tt.Click("新建标签页"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click("新建 " + kindName); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+}
+
+// TestVersionLineNamesTheApp checks the status bar calls the app ApiGo: the
+// files it writes keep the old lower case name, the name it shows does not.
+func TestVersionLineNamesTheApp(t *testing.T) {
+	if got := appVersion(); got != "ApiGo" && !strings.HasPrefix(got, "ApiGo ") {
+		t.Errorf("version line %q, want the app named ApiGo", got)
+	}
+	a := testApp(t)
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if !tt.HasText("ApiGo") {
+		t.Errorf("texts %q, want the app's name in the status bar", tt.Texts())
+	}
+}
+
+// TestSettingsFitAShortWindow checks the settings panel stops inside a short
+// window and its sections scroll: the last of them was pushed past the window's
+// edge before.
+func TestSettingsFitAShortWindow(t *testing.T) {
+	a := testApp(t)
+	a.settingsOpen = true
+	tt := ui.NewTester(a.view, 1280, 560)
+	tt.Frame()
+
+	// The panel leaves the window's own edge to the dimmed backdrop.
+	if r, _, _, _ := tt.Image().RGBAAt(640, 555).RGBA(); r>>8 > 200 {
+		t.Errorf("the bottom of the window is %d, want the backdrop around the panel", r>>8)
+	}
+
+	before, ok := tt.Find("版本")
+	if !ok {
+		t.Fatal("texts of a short window hold no version line")
+	}
+	tt.Scroll(640, 300, 0, 400)
+	tt.Frame()
+	after, _ := tt.Find("版本")
+	if after.Y >= before.Y {
+		t.Errorf("the version line stayed at %.1f after scrolling from %.1f, want it up",
+			after.Y, before.Y)
 	}
 }

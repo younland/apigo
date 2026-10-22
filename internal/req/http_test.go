@@ -1,10 +1,12 @@
 package req
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,7 +83,7 @@ func TestExecuteReadsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := Execute(context.Background(), req)
+	res := Execute(context.Background(), req, 0)
 	if res.Err != nil {
 		t.Fatalf("execute: %v", res.Err)
 	}
@@ -108,7 +110,64 @@ func TestExecuteReportsNetworkFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res := Execute(context.Background(), req); res.Err == nil {
+	if res := Execute(context.Background(), req, 0); res.Err == nil {
 		t.Fatal("no error for a closed server")
+	}
+}
+
+// TestExecuteCapsTheBody checks a body past the limit comes back cut to it,
+// with what the limit was said in the error.
+func TestExecuteCapsTheBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("x"), 3000))
+	}))
+	defer server.Close()
+
+	req, err := BuildRequest(Spec{Method: "GET", RawURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const limit = 2048
+	res := Execute(context.Background(), req, limit)
+	if len(res.Raw) != limit || res.Size != limit {
+		t.Errorf("body %d bytes, size %d, want the %d of the limit", len(res.Raw), res.Size, limit)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "2 KB") {
+		t.Errorf("error %v, want one naming the 2 KB limit", res.Err)
+	}
+}
+
+// TestExecuteDefaultsItsLimit checks a limit of zero takes the default, so a
+// caller that says nothing still gets a body.
+func TestExecuteDefaultsItsLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("small"))
+	}))
+	defer server.Close()
+
+	req, err := BuildRequest(Spec{Method: "GET", RawURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := Execute(context.Background(), req, 0); res.Err != nil || res.Body != "small" {
+		t.Errorf("body %q error %v, want the body read with the default limit", res.Body, res.Err)
+	}
+}
+
+// TestLimitTextWritesSizes checks a cap reads as a person expects it.
+func TestLimitTextWritesSizes(t *testing.T) {
+	tests := []struct {
+		limit int64
+		want  string
+	}{
+		{2 << 10, "2 KB"},
+		{1 << 20, "1 MB"},
+		{100 << 20, "100 MB"},
+		{1<<20 + 1<<19, "1.5 MB"},
+	}
+	for _, test := range tests {
+		if got := limitText(test.limit); got != test.want {
+			t.Errorf("limitText(%d) = %q, want %q", test.limit, got, test.want)
+		}
 	}
 }

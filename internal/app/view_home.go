@@ -137,41 +137,69 @@ func (a *app) collectionModal(c *ui.Context, p design.Palette) {
 // homeCollectionRow is one collection of the list: its icon, name and the
 // kinds it holds, with the menu that opens or deletes it. The row is the
 // collection's own target: the pointer tints it, and a double click opens it,
-// as a double click opens a file.
+// as a double click opens a file. A collection whose directory is gone stays on
+// the list, greyed out, and asks to be taken off instead of opening.
 func (a *app) homeCollectionRow(c *ui.Context, p design.Palette, col collection) {
+	missing := a.collectionMissing(col.ID)
 	row := ui.Row(c).FillWidth().Height(52).AlignItems(ui.Center).Gap(12).
 		Padding(0, 8).Radius(design.Radius).Cursor(ui.CursorPointer)
-	row.Children(func() { a.homeCollectionBody(c, p, col) })
+	row.Children(func() { a.homeCollectionBody(c, p, col, missing) })
 	if row.Hovered() {
 		row.Background(p.SurfaceHover)
 	}
 	if row.DoubleClicked() {
-		a.openCollection(col.ID)
+		a.openOrForgetCollection(col, missing)
 	}
 	a.divider(c, p)
 }
 
+// openOrForgetCollection opens a collection, or asks to take it off the list
+// when its directory is gone: there is nothing left to open.
+func (a *app) openOrForgetCollection(col collection, missing bool) {
+	if missing {
+		a.askToForgetMissingCollection(col.ID)
+		return
+	}
+	a.openCollection(col.ID)
+}
+
 // homeCollectionBody draws what a collection row holds: its icon, name and the
-// kinds it holds, with the click that opens it and the menu of its actions.
-func (a *app) homeCollectionBody(c *ui.Context, p design.Palette, col collection) {
+// kinds it holds, with the click that opens it and the menu of its actions. The
+// name takes the room the row has, so it is shortened only where the window is
+// too narrow for it.
+func (a *app) homeCollectionBody(c *ui.Context, p design.Palette, col collection, missing bool) {
+	ink := p.Text
+	if missing {
+		// A collection whose directory is gone reads as struck through, in the
+		// muted ink of what is no longer there.
+		ink = p.TextMuted
+	}
 	ui.Row(c).Size(32, 32).Radius(8).Background(p.SurfaceHover).Center().Children(func() {
-		ui.Icon(c, icons.Folder).FontSize(16).TextColor(p.Accent)
+		icon := p.Accent
+		if missing {
+			icon = p.TextMuted
+		}
+		ui.Icon(c, icons.Folder).FontSize(16).TextColor(icon)
 	})
-	ui.Column(c).Gap(2).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, col.Name).FontSize(design.FontSizeTitle).TextColor(p.Text).SingleLine()
-			ui.Text(c, "HTTP").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
-		})
+	ui.Column(c).Grow(1).Gap(2).Children(func() {
+		name := ui.Text(c, col.Name).Grow(1).FontSize(design.FontSizeTitle).
+			TextColor(ink).SingleLine()
+		if missing {
+			name.Strikethrough()
+		}
 		ui.Textf(c, "%d 个接口", store.CountRequests(col.Root)).
 			FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
 	})
-	ui.Row(c).Grow(1)
 	open := ui.ButtonBase(c).Height(30).Padding(0, 10).Label("打开 " + col.Name).
 		Cursor(ui.CursorPointer).Children(func() {
-		ui.Text(c, "打开").FontSize(design.FontSizeBody).TextColor(p.TextSecondary)
+		color := p.TextSecondary
+		if missing {
+			color = p.TextMuted
+		}
+		ui.Text(c, "打开").FontSize(design.FontSizeBody).TextColor(color)
 	})
 	if open.Clicked() {
-		a.openCollection(col.ID)
+		a.openOrForgetCollection(col, missing)
 	}
 	more := ui.ButtonBase(c).Width(28).Height(28).Label("集合操作 " + col.Name).
 		Cursor(ui.CursorPointer).Children(func() {

@@ -24,10 +24,13 @@ func Run() {
 		if err := a.store.Load(); err != nil {
 			log.Printf("读取本地集合失败：%v", err)
 		}
+		// A collection whose directory another program deleted stays on the
+		// list, marked, rather than opening what is not there.
+		a.refreshMissing()
 		// The appearance, accent and language of the last run.
 		a.applySettings()
 		window := mygo.NewWindow(mygo.WindowOptions{
-			Title:     "apigo",
+			Title:     appName,
 			Width:     1280,
 			Height:    800,
 			MinWidth:  1024,
@@ -48,6 +51,12 @@ func Run() {
 		// The tree follows the files another program changes in the open
 		// collection's directory.
 		a.watch = watchFiles
+		// A response the reader downloads goes where the desktop's folder
+		// dialog says, opening at the downloads directory.
+		a.pickDownloadDir = chooseDownloadDir
+		// A newer release is looked for only when the settings say so: the
+		// check reaches the network.
+		a.checkUpdatesAtStart()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -57,9 +66,26 @@ func Run() {
 // chooseDirectory asks the desktop's file manager for a folder, "" when the
 // user cancels.
 func chooseDirectory() (string, error) {
+	return chooseFolder("选择数据目录", "选择", "")
+}
+
+// chooseDownloadDir asks where a downloaded response goes: the dialog opens at
+// the desktop's downloads directory, and says "" when the reader cancels.
+func chooseDownloadDir() (string, error) {
+	start, err := mygo.App.Path(mygo.PathDownloads)
+	if err != nil {
+		start = "" // no downloads directory: the dialog opens where it likes
+	}
+	return chooseFolder("保存下载的文件到", "保存到此处", start)
+}
+
+// chooseFolder asks the desktop for a folder, opening at start, "" when the
+// user cancels.
+func chooseFolder(title, button, start string) (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title:             "选择数据目录",
-		ButtonLabel:       "选择",
+		Title:             title,
+		ButtonLabel:       button,
+		DefaultPath:       start,
 		Directory:         true,
 		CreateDirectories: true,
 	})

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestCollectionLayoutOnDisk pins the layout every collection has on disk:
@@ -147,11 +146,6 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err := s.SaveEnvironments(); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddHistory(HistoryEntry{
-		Method: "GET", URL: "https://api.example.com/pets", Status: 200, At: time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
 
 	loaded := New(dir)
 	if err := loaded.Load(); err != nil {
@@ -178,9 +172,6 @@ func TestStoreRoundTrip(t *testing.T) {
 	active := loaded.ActiveEnvironment(saved.ID)
 	if active == nil || active.Vars[0].Value != "http://localhost:8080" {
 		t.Errorf("active environment %+v, want the saved BaseURL", active)
-	}
-	if len(loaded.History) != 1 || loaded.History[0].Status != 200 {
-		t.Errorf("history %+v, want the sent request", loaded.History)
 	}
 }
 
@@ -329,6 +320,24 @@ func TestSafeFileName(t *testing.T) {
 		if got := safeFileName(test.in); got != test.want {
 			t.Errorf("safeFileName(%q) = %q, want %q", test.in, got, test.want)
 		}
+	}
+}
+
+// TestFirstWriteStaysInTheCollection checks the first write of a collection,
+// its own apigo.yaml, waits in the collection: nothing is written above it,
+// where a walk up looking for apigo.yaml would end at the volume root.
+func TestFirstWriteStaysInTheCollection(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	col, err := s.NewCollection("Demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(s.CollectionDir(col.ID), TmpDirName)); err != nil {
+		t.Errorf("temp directory: %v, want the writes kept in the collection", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), TmpDirName)); !os.IsNotExist(err) {
+		t.Errorf("a temp directory was made above the store, want none")
 	}
 }
 

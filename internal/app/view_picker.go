@@ -107,10 +107,11 @@ func splitPath(treePath string) []string {
 	return names
 }
 
-// folderButton is the button that goes ahead with the folder chosen.
+// folderButton is the button that goes ahead with the folder chosen. Its name
+// says which dialog it belongs to: the request line has a 保存 of its own.
 func folderButton(c *ui.Context, p design.Palette, q *folderQuestion) ui.Element {
 	btn := ui.ButtonBase(c).Height(32).Padding(0, 14).Radius(design.Radius).
-		Label(q.action).Background(p.Accent).Cursor(ui.CursorPointer)
+		Label("确认" + q.action).Background(p.Accent).Cursor(ui.CursorPointer)
 	if btn.Hovered() {
 		btn.Background(p.AccentHover)
 	}

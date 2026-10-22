@@ -16,9 +16,17 @@ import (
 	"apigo/internal/widgets"
 )
 
-// maxResponseBytes caps what the app reads of a response, so a large body
-// cannot exhaust memory or stall a frame.
-const maxResponseBytes = 10 << 20
+// limitText writes a cap as a person reads it: the settings ask for megabytes,
+// and a small limit reads better in kilobytes.
+func limitText(limit int64) string {
+	if limit < 1<<20 {
+		return fmt.Sprintf("%d KB", limit>>10)
+	}
+	if limit%(1<<20) == 0 {
+		return fmt.Sprintf("%d MB", limit>>20)
+	}
+	return fmt.Sprintf("%.1f MB", float64(limit)/(1<<20))
+}
 
 // Part is one field of a multipart form: its text, or the file it uploads.
 type Part struct {
@@ -50,7 +58,10 @@ type Response struct {
 	Size       int
 	Headers    http.Header
 	Body       string
-	Err        error
+	// Raw is the body as the bytes it came as: a picture, a sound or a file is
+	// shown from them, where Body reads as text.
+	Raw []byte
+	Err error
 }
 
 // buildRequest turns the panes into an HTTP request: the URL with enabled
@@ -181,9 +192,16 @@ func carriesBody(method string) bool {
 	}
 }
 
-// execute sends the request and reads the response, capped at
-// maxResponseBytes.
-func Execute(ctx context.Context, req *http.Request) *Response {
+// DefaultMaxResponse caps a response body when the caller names no limit: a
+// hundred megabytes, which is what the settings offer to change.
+const DefaultMaxResponse = 100 << 20
+
+// Execute sends the request and reads the response, capped at limit bytes: a
+// limit of zero or less takes DefaultMaxResponse.
+func Execute(ctx context.Context, req *http.Request, limit int64) *Response {
+	if limit <= 0 {
+		limit = DefaultMaxResponse
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	start := time.Now()
 	resp, err := client.Do(req.WithContext(ctx))
@@ -192,7 +210,7 @@ func Execute(ctx context.Context, req *http.Request) *Response {
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	out := &Response{
 		Status:     resp.StatusCode,
 		StatusText: http.StatusText(resp.StatusCode),
@@ -204,11 +222,14 @@ func Execute(ctx context.Context, req *http.Request) *Response {
 		out.Err = describe(err)
 		return out
 	}
-	if len(data) > maxResponseBytes {
-		out.Body = string(data[:maxResponseBytes])
-		out.Err = fmt.Errorf("响应体超过 %d MB，已截断", maxResponseBytes>>20)
+	if int64(len(data)) > limit {
+		out.Raw = data[:limit]
+		out.Body = string(out.Raw)
+		out.Size = int(limit)
+		out.Err = fmt.Errorf("响应体超过 %s，已截断", limitText(limit))
 		return out
 	}
+	out.Raw = data
 	out.Body = string(data)
 	return out
 }

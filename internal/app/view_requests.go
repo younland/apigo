@@ -10,8 +10,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// requestsPanel is the left panel of a collection: the search and the
-// history over its interfaces, which are a tree of folders and requests.
+// requestsPanel is the left panel of a collection: the search over its
+// interfaces, which are a tree of folders and requests.
 func (a *app) requestsPanel(c *ui.Context, p design.Palette) {
 	col := a.activeCollection()
 	ui.Column(c).Width(design.SidebarWidth).FillHeight().Background(p.Background).
@@ -19,16 +19,11 @@ func (a *app) requestsPanel(c *ui.Context, p design.Palette) {
 		ui.Row(c).Height(design.HeaderHeight).FillWidth().
 			Padding(0, design.PanelPadding).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.TextInput(c, &a.search).Grow(1).Height(26).Placeholder("搜索接口")
-			a.panelModeButton(c, p)
 		})
 		a.divider(c, p)
 		ui.Scroll(c).Grow(1).FillWidth().Children(func() {
 			ui.Column(c).FillWidth().Padding(design.RowGap, design.PanelPadding).
 				Gap(2).Children(func() {
-				if a.panelMode == panelHistory {
-					a.historyPanel(c, p)
-					return
-				}
 				a.requestTree(c, p, col)
 			})
 		})
@@ -42,23 +37,6 @@ func (a *app) activeCollection() collection {
 		return a.store.Collections[i]
 	}
 	return collection{}
-}
-
-// panelModeButton switches the panel between requests and history.
-func (a *app) panelModeButton(c *ui.Context, p design.Palette) {
-	icon, label := icons.Clock, "历史"
-	if a.panelMode == panelHistory {
-		icon, label = icons.Folder, "接口"
-	}
-	if ui.ButtonBase(c).Width(24).Height(24).Label(label).Cursor(ui.CursorPointer).Children(func() {
-		ui.Icon(c, icon).FontSize(13).TextColor(p.TextMuted)
-	}).Clicked() {
-		if a.panelMode == panelHistory {
-			a.panelMode = panelRequests
-			return
-		}
-		a.panelMode = panelHistory
-	}
 }
 
 // kindFilterButton picks the kind the tree lists, "" for every kind.
@@ -79,7 +57,7 @@ func (a *app) kindFilterButton(c *ui.Context, p design.Palette) {
 		if row.Clicked() {
 			a.kindFilter, a.filterOpen = "", false
 		}
-		a.kindMenu(c, p, func(k kind) { a.kindFilter, a.filterOpen = k, false })
+		a.kindMenu(c, p, "", func(k kind) { a.kindFilter, a.filterOpen = k, false })
 	})
 }
 
@@ -193,7 +171,7 @@ func (a *app) folderAddButton(c *ui.Context, p design.Palette, f folder) {
 			a.askNewFolder(f.Path)
 		}
 		ui.Row(c).Height(design.BorderWidth).FillWidth().Background(p.Divider)
-		a.kindMenu(c, p, func(k kind) {
+		a.kindMenu(c, p, "", func(k kind) {
 			*open = false
 			if err := a.addRequest(k, f.Path); err != nil {
 				c.Toast(err.Error())
@@ -219,10 +197,6 @@ func (a *app) matchesFilter(req savedRequest) bool {
 // The one a tab shows is tinted with the accent; any row tints under the
 // pointer.
 func (a *app) requestLineRow(c *ui.Context, p design.Palette, col collection, req savedRequest, depth int) {
-	label, color := req.Method, p.Method(req.Method)
-	if req.Kind != kindREST {
-		label, color = store.KindName(req.Kind), p.TextMuted
-	}
 	opened := a.activeShows(req.Path)
 	name, bg := p.TextSecondary, ui.Color{}
 	if opened {
@@ -237,8 +211,9 @@ func (a *app) requestLineRow(c *ui.Context, p design.Palette, col collection, re
 		body := ui.ButtonBase(c).Grow(1).Height(26).Label("请求 " + req.Name).
 			Justify(ui.Start).Gap(6).Cursor(ui.CursorPointer)
 		body.Children(func() {
-			ui.Icon(c, kindIcon(req.Kind)).FontSize(11).TextColor(color)
-			ui.Text(c, label).Bold().FontSize(design.FontSizeTiny).TextColor(color).SingleLine()
+			// A REST request names its method before its name; any other keeps
+			// the icon of its kind alone, as its tab does.
+			a.kindBadge(c, p, req)
 			ui.Text(c, req.Name).FontSize(design.FontSizeBody).TextColor(name).SingleLine()
 		})
 		if body.Clicked() {
@@ -261,6 +236,18 @@ func (a *app) requestLineRow(c *ui.Context, p design.Palette, col collection, re
 	if !opened && row.Hovered() {
 		row.Background(p.SurfaceHover)
 	}
+}
+
+// kindBadge draws what stands before the name of a tree row: the method of a
+// REST request, or the icon of the kind of any other.
+func (a *app) kindBadge(c *ui.Context, p design.Palette, req savedRequest) {
+	if req.Kind != kindREST {
+		ui.Icon(c, kindIcon(req.Kind)).FontSize(13).TextColor(p.TextMuted)
+		return
+	}
+	ui.Icon(c, kindIcon(req.Kind)).FontSize(11).TextColor(p.Method(req.Method))
+	ui.Text(c, req.Method).Bold().FontSize(design.FontSizeTiny).
+		TextColor(p.Method(req.Method)).SingleLine()
 }
 
 // moreButton is the "⋮" a row of the tree opens its menu with, standing on its
@@ -286,33 +273,4 @@ func (a *app) folderActions(f folder) []menuAction {
 			a.askToDeleteFolder(f.Path)
 		}},
 	}
-}
-
-// historyPanel lists the sent requests, newest first; a click opens one.
-func (a *app) historyPanel(c *ui.Context, p design.Palette) {
-	if len(a.store.History) == 0 {
-		ui.Text(c, "还没有请求历史").FontSize(design.FontSizeBody).TextColor(p.TextSecondary)
-		return
-	}
-	for _, entry := range a.store.History {
-		a.historyRow(c, p, entry)
-	}
-}
-
-func (a *app) historyRow(c *ui.Context, p design.Palette, entry historyEntry) {
-	ui.Row(c).Height(26).FillWidth().AlignItems(ui.Center).Gap(6).Children(func() {
-		ui.Text(c, entry.Method).Bold().FontSize(design.FontSizeTiny).
-			TextColor(p.Method(entry.Method)).SingleLine()
-		if ui.ButtonBase(c).Grow(1).Height(26).Label("历史 " + entry.URL).
-			Justify(ui.Start).Cursor(ui.CursorPointer).Children(func() {
-			ui.Text(c, entry.URL).FontSize(design.FontSizeBody).
-				TextColor(p.TextSecondary).SingleLine()
-		}).Clicked() {
-			a.openHistory(entry)
-		}
-		if entry.Status != 0 {
-			ui.Textf(c, "%d", entry.Status).FontSize(design.FontSizeTiny).
-				TextColor(p.Status(entry.Status))
-		}
-	})
 }

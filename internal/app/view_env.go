@@ -218,60 +218,100 @@ var appearances = []struct {
 	{design.Black, icons.MoonLit, "纯黑"},
 }
 
+// settingsPanelHeight caps how tall the settings panel grows: in a shorter
+// window the sections scroll inside it, rather than pushing the last of them
+// past the window's edge.
+const (
+	settingsPanelHeight float32 = 720
+	settingsPadding     float32 = 24
+	settingsGap         float32 = 16
+	// settingsTitleHeight is the room the head of the panel takes.
+	settingsTitleHeight float32 = 32
+	// settingsModalInset is the room the modal keeps around its panel.
+	settingsModalInset float32 = 40
+)
+
 // settingsModal shows the app's settings: the language, the appearance and
 // the accent, and where the collections are kept.
 func (a *app) settingsModal(c *ui.Context, p design.Palette) {
 	if !a.settingsOpen {
 		return
 	}
+	_, height := c.Size()
+	tall := min(settingsPanelHeight, height-2*settingsModalInset)
+	body := tall - 2*settingsPadding - settingsTitleHeight - settingsGap
+	body = max(body, settingsPadding)
 	ui.Modal(c, &a.settingsOpen, func() {
-		ui.Column(c).Width(720).Padding(24).Gap(20).
+		ui.Column(c).Width(720).Padding(settingsPadding).Gap(settingsGap).
 			Background(p.Background).Radius(8).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "设置").Bold().FontSize(design.FontSizeDisplay).TextColor(p.Text)
-				ui.Row(c).Grow(1)
-				if ui.ButtonBase(c).Width(24).Height(24).Label("关闭设置").Cursor(ui.CursorPointer).
-					Children(func() {
-						ui.Icon(c, icons.Close).FontSize(12).TextColor(p.TextMuted)
-					}).Clicked() {
-					a.settingsOpen = false
+			a.settingsTitle(c, p)
+			// The body caps itself instead of the panel: the sections past its edge
+			// scroll, and the bar says there are more.
+			ui.Scroll(c).Height(body).FillWidth().Children(func() {
+				a.settingsSections(c, p)
+			})
+		})
+	})
+}
+
+// settingsTitle is the head of the settings panel: what it is, and the cross
+// that closes it.
+func (a *app) settingsTitle(c *ui.Context, p design.Palette) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "设置").Bold().FontSize(design.FontSizeDisplay).TextColor(p.Text)
+		ui.Row(c).Grow(1)
+		if ui.ButtonBase(c).Width(24).Height(24).Label("关闭设置").Cursor(ui.CursorPointer).
+			Children(func() {
+				ui.Icon(c, icons.Close).FontSize(12).TextColor(p.TextMuted)
+			}).Clicked() {
+			a.settingsOpen = false
+		}
+	})
+}
+
+// settingsSections draws what the settings change, one section after another.
+func (a *app) settingsSections(c *ui.Context, p design.Palette) {
+	ui.Column(c).FillWidth().Gap(20).Children(func() {
+		a.settingsSection(c, p, "通用", "应用程序中使用的通用设置", func() {
+			a.settingsLabel(c, p, "语言")
+			a.languagePicker(c, p)
+			ui.Row(c).Height(design.RowGap)
+			a.settingsLabel(c, p, "响应体上限（MB）")
+			a.responseLimitField(c, p)
+			ui.Row(c).Height(design.RowGap)
+			a.settingsLabel(c, p, "更新")
+			a.autoUpdateField(c, p)
+		})
+		a.divider(c, p)
+		a.settingsSection(c, p, "主题", "自定义您的应用程序主题。", func() {
+			a.settingsLabel(c, p, "背景")
+			ui.Text(c, a.backgroundNote()).FontSize(design.FontSizeBody).
+				TextColor(p.TextMuted)
+			a.appearanceButtons(c, p)
+			ui.Row(c).Height(design.RowGap)
+			a.settingsLabel(c, p, "强调色")
+			ui.Text(c, a.accentColor().Name).FontSize(design.FontSizeBody).
+				TextColor(p.TextMuted)
+			a.accentButtons(c, p)
+		})
+		a.divider(c, p)
+		a.settingsSection(c, p, "数据", "集合与环境存放的位置。", func() {
+			a.settingsLabel(c, p, "数据目录")
+			ui.Text(c, a.store.DirText()).FontSize(design.FontSizeBody).
+				TextColor(p.TextSecondary).Selectable()
+			ui.Row(c).Gap(design.RowGap).Children(func() {
+				if ui.Button(c, "更换目录").Cursor(ui.CursorPointer).Clicked() {
+					a.chooseDataDir(c)
+				}
+				if ui.Button(c, "打开目录").Cursor(ui.CursorPointer).Clicked() {
+					if err := a.openFolder(a.store.DirText()); err != nil {
+						c.Toast("打开目录失败：" + err.Error())
+					}
 				}
 			})
-			a.settingsSection(c, p, "通用", "应用程序中使用的通用设置", func() {
-				a.settingsLabel(c, p, "语言")
-				a.languagePicker(c, p)
-			})
-			a.divider(c, p)
-			a.settingsSection(c, p, "主题", "自定义您的应用程序主题。", func() {
-				a.settingsLabel(c, p, "背景")
-				ui.Text(c, a.backgroundNote()).FontSize(design.FontSizeBody).
-					TextColor(p.TextMuted)
-				a.appearanceButtons(c, p)
-				ui.Row(c).Height(design.RowGap)
-				a.settingsLabel(c, p, "强调色")
-				ui.Text(c, a.accentColor().Name).FontSize(design.FontSizeBody).
-					TextColor(p.TextMuted)
-				a.accentButtons(c, p)
-			})
-			a.divider(c, p)
-			a.settingsSection(c, p, "数据", "集合、环境与历史存放的位置。", func() {
-				a.settingsLabel(c, p, "数据目录")
-				ui.Text(c, a.store.DirText()).FontSize(design.FontSizeBody).
-					TextColor(p.TextSecondary).Selectable()
-				ui.Row(c).Gap(design.RowGap).Children(func() {
-					if ui.Button(c, "更换目录").Cursor(ui.CursorPointer).Clicked() {
-						a.chooseDataDir(c)
-					}
-					if ui.Button(c, "打开目录").Cursor(ui.CursorPointer).Clicked() {
-						if err := a.openFolder(a.store.DirText()); err != nil {
-							c.Toast("打开目录失败：" + err.Error())
-						}
-					}
-				})
-				a.settingsLabel(c, p, "版本")
-				ui.Text(c, appVersion()).FontSize(design.FontSizeBody).
-					TextColor(p.TextSecondary)
-			})
+			a.settingsLabel(c, p, "版本")
+			ui.Text(c, appVersion()).FontSize(design.FontSizeBody).
+				TextColor(p.TextSecondary)
 		})
 	})
 }
@@ -285,6 +325,43 @@ func (a *app) settingsSection(c *ui.Context, p design.Palette, title, note strin
 			ui.Text(c, note).FontSize(design.FontSizeBody).TextColor(p.TextMuted)
 		})
 		ui.Column(c).Grow(1).Gap(6).Children(controls)
+	})
+}
+
+// responseLimitField edits how much of a response the app reads, in megabytes:
+// a body past the limit is cut to it, with the cut noted in the response pane.
+func (a *app) responseLimitField(c *ui.Context, p design.Palette) {
+	input := ui.NumberInput(c, &a.maxResponseMB,
+		minResponseLimitMB, maxResponseLimitMB, 1).Width(120).Label("响应体上限 MB")
+	if input.Changed() {
+		a.saveSettingsOrToast(c)
+	}
+	ui.Text(c, "响应体超过上限会被截断，默认 100 MB").
+		FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+}
+
+// autoUpdateField turns the check for a newer version on or off, and asks for
+// one now: the check reaches the network, so it is off until asked for.
+func (a *app) autoUpdateField(c *ui.Context, p design.Palette) {
+	check := ui.Checkbox(c, &a.autoUpdate, "自动更新").Label("自动更新")
+	if check.Changed() {
+		a.saveSettingsOrToast(c)
+	}
+	ui.Text(c, "启动时检查新版本；不开启时只在点「检查更新」时联网").
+		FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+	ui.Row(c).Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
+		label := "检查更新"
+		if a.checkingUpdate {
+			label = "检查中…"
+		}
+		btn := ui.Button(c, label).Cursor(ui.CursorPointer).Disabled(a.checkingUpdate)
+		if btn.Clicked() {
+			a.checkUpdates(true)
+		}
+		if a.updateNote != "" {
+			ui.Text(c, a.updateNote).FontSize(design.FontSizeTiny).
+				TextColor(p.TextMuted).SingleLine()
+		}
 	})
 }
 

@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"apigo/internal/design"
 	"apigo/internal/req"
 	"apigo/internal/store"
 	"apigo/internal/widgets"
+	"apigo/internal/ws"
 
+	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 )
@@ -44,12 +47,12 @@ func newWorkspace() *workspace {
 // says what to do in its place.
 func (ws *workspace) empty() bool { return len(ws.tabs) == 0 }
 
-// panelMode is what the requests panel lists.
-type panelMode int
-
+// The limits a response body is read under, in megabytes: what the settings
+// offer by default, and the smallest and largest it holds.
 const (
-	panelRequests panelMode = iota
-	panelHistory
+	defaultResponseLimitMB = 100
+	minResponseLimitMB     = 1
+	maxResponseLimitMB     = 10240
 )
 
 // tab is one request of the tab strip: its own method, URL, parameters,
@@ -74,15 +77,45 @@ type tab struct {
 	loading  bool
 	resp     *response
 	respEdit editor.State
+	// rawEdit shows the body as it came, where respEdit shows the preview of it.
+	rawEdit editor.State
+	// respTab is the pane of the response shown: the preview, the raw body, the
+	// response headers, or the request headers.
+	respTab int
+	// cancel ends the request in flight, nil when none is.
+	cancel context.CancelFunc
+	// sentHeaders are the headers the last request went out with, which the
+	// response pane lists.
+	sentHeaders http.Header
+	// The response is shown by what it holds: a picture and a sound are drawn
+	// from these, and anything else is offered as a file.
+	view        responseBody
+	picture     *ui.Bitmap
+	pictureNote string
+	audio       *audio.Player
+	mediaErr    error // why a picture or a sound could not be shown
 
 	saved     string // the request as it was written, for unsaved
 	dirty     bool
 	renaming  bool
 	renameOld string
+
+	// A socket request keeps its connection, the log of what it did, and how it
+	// sends: the format of a message, whether the editor clears after sending,
+	// and the subprotocol it asks for.
+	conn        *ws.Conn
+	connecting  bool
+	socketLog   []wsEvent
+	wsTab       int
+	clearOnSend bool
+	protocol    string
+	msgFormat   string
+	logFilter   string
 }
 
 func newTab() *tab {
-	t := &tab{kind: kindREST, method: "GET", title: "Untitled", bodyType: "json"}
+	t := &tab{kind: kindREST, method: "GET", title: "Untitled", bodyType: "json",
+		clearOnSend: true}
 	t.body = editor.NewBuffer("")
 	t.body.SetLanguage(editor.LanguageFor("body.json"))
 	t.bodyEdit.Buffer = t.body
@@ -91,6 +124,9 @@ func newTab() *tab {
 	t.respEdit.Buffer = editor.NewBuffer("")
 	t.respEdit.ReadOnly = true
 	t.respEdit.SoftWrap = false
+	t.rawEdit.Buffer = editor.NewBuffer("")
+	t.rawEdit.ReadOnly = true
+	t.rawEdit.SoftWrap = true
 	return t
 }
 
@@ -158,17 +194,23 @@ func (t *tab) unsaved() bool {
 	return t.path == "" || t.snapshot() != t.saved
 }
 
-// setBodyLanguage highlights the body buffer as the selected type reads it,
-// and says how that type's body is written.
+// setBodyLanguage highlights the body buffer as the selected type reads it, and
+// says how that type's body is written: a request's body, and a socket's
+// message, read in the same editor.
 func (t *tab) setBodyLanguage() {
 	name, placeholder := "body.txt", "任意文本"
 	switch t.bodyType {
-	case "json":
+	case "json", "graphql":
 		name, placeholder = "body.json", "{\n  \"key\": \"value\"\n}"
+		if t.bodyType == "graphql" {
+			placeholder = "{\n  \"query\": \"{ pets { id } }\",\n  \"variables\": {}\n}"
+		}
 	case "xml":
 		name, placeholder = "body.xml", "<note>\n  <to>you</to>\n</note>"
-	case "graphql":
-		name, placeholder = "body.json", "{\n  \"query\": \"{ pets { id } }\",\n  \"variables\": {}\n}"
+	case "html":
+		name, placeholder = "body.html", "<p>任意文本</p>"
+	case "binary":
+		placeholder = "二进制消息暂不支持发送"
 	}
 	t.body.SetLanguage(editor.LanguageFor(name))
 	t.bodyEdit.Placeholder = placeholder
@@ -192,14 +234,16 @@ type app struct {
 	active string   // the active collection, "" for the home window
 	closed []string // recently closed collections, newest first
 
-	panelMode    panelMode
-	search       string
-	kindFilter   kind // "" lists every kind
-	envOpen      bool // the environment manager
-	settingsOpen bool
-	envID        string
-	envName      string
-	envVars      widgets.State
+	search string
+	// sidebarCollapsed folds the tree of a collection away, for the room a
+	// narrow window needs.
+	sidebarCollapsed bool
+	kindFilter       kind // "" lists every kind
+	envOpen          bool // the environment manager
+	settingsOpen     bool
+	envID            string
+	envName          string
+	envVars          widgets.State
 	// envEdits is how the environments stood when the manager opened: what a
 	// cancel puts back.
 	envEdits     []environment
@@ -219,11 +263,31 @@ type app struct {
 	menus          map[string]*bool // the popover menus open, by their key
 	saveErr        string           // the interface write that failed, shown once
 	languageOpen   bool             // the language menu of the settings
+	// maxResponseMB is how much of a response the app reads, as the settings
+	// edit it in megabytes.
+	maxResponseMB float64
+
+	// autoUpdate makes the app look for a newer version at startup, off until
+	// the reader turns it on. checkingUpdate says a check is on its way, and
+	// updateNote what the last one found. checkRelease asks for the newest
+	// release; main leaves it nil for GitHub's, and tests replace it.
+	autoUpdate     bool
+	checkingUpdate bool
+	updateNote     string
+	checkRelease   func(ctx context.Context) (release, error)
 
 	// watched is the collection whose directory a watch follows, and
 	// watchStop ends that watch.
 	watched   string
 	watchStop func()
+
+	// missing holds the collections whose directory is gone: the list greys
+	// them out and offers to take them off rather than opening what is not
+	// there. listWatched says the watch of the collections directory was
+	// tried, and listWatchStop ends it.
+	missing       map[string]bool
+	listWatched   bool
+	listWatchStop func()
 
 	store *dataStore
 
@@ -245,6 +309,11 @@ type app struct {
 	// file dialog; tests replace it.
 	chooseFile func() (string, error)
 
+	// pickDownloadDir asks the desktop where a response body goes when the
+	// reader downloads it: the downloads directory is where the dialog opens,
+	// and "" when the reader cancels. main fills it; tests replace it.
+	pickDownloadDir func() (string, error)
+
 	// watch follows a collection's directory for the changes another program
 	// makes in it. main fills it with mygo's watch; tests replace it.
 	watch watchStarter
@@ -252,13 +321,14 @@ type app struct {
 
 func newApp() *app {
 	return &app{
-		mode:     design.System,
-		applied:  design.Mode(-1),
-		accent:   design.DefaultAccent.Name,
-		language: languages[0],
-		percent:  55,
-		spaces:   map[string]*workspace{},
-		store:    store.New(""),
+		mode:          design.System,
+		applied:       design.Mode(-1),
+		accent:        design.DefaultAccent.Name,
+		language:      languages[0],
+		percent:       55,
+		maxResponseMB: defaultResponseLimitMB,
+		spaces:        map[string]*workspace{},
+		store:         store.New(""),
 	}
 }
 
@@ -401,6 +471,18 @@ func (a *app) addTab(ws *workspace) {
 	a.openTab(ws, newTab(), ws.active+1)
 }
 
+// addTabOfKind opens an empty request of a kind after the active tab. A socket
+// has no method and sends JSON, as one made in the tree's menu does.
+func (a *app) addTabOfKind(ws *workspace, k kind) {
+	t := newTab()
+	t.kind, t.collectionID = k, a.active
+	if k != kindREST {
+		t.method, t.bodyType = "", "json"
+		t.setBodyLanguage()
+	}
+	a.openTab(ws, t, ws.active+1)
+}
+
 // openTab puts t at position i of the workspace and shows it, writing back the
 // tab it leaves when that is another one. An empty workspace takes the tab at
 // its only place, whatever i asked for.
@@ -487,8 +569,16 @@ func (a *app) duplicateTabAt(ws *workspace, t *tab) {
 	}
 }
 
-// dropTabMenu forgets the menu of a tab that is going away.
-func (a *app) dropTabMenu(t *tab) { delete(a.menus, requestTabMenuKey(t)) }
+// dropTabMenu lets go of what a tab that is going away held: its menu, the
+// picture or the sound of its response, and its socket.
+func (a *app) dropTabMenu(t *tab) {
+	delete(a.menus, requestTabMenuKey(t))
+	if t != nil {
+		t.stopAudio()
+		t.picture = nil
+		t.closeSocket()
+	}
+}
 
 // newCollection creates a collection with its default environments and
 // opens it.
@@ -500,6 +590,9 @@ func (a *app) newCollection(name string) error {
 	if err != nil {
 		return err
 	}
+	// A collection makes the directory the list lives in: the watch of it is
+	// worth another try when the data directory had none.
+	a.listWatched = false
 	a.openCollection(col.ID)
 	return nil
 }
@@ -631,6 +724,13 @@ func (a *app) useDataDir(dir string) error {
 	a.store = next
 	a.forgetEverything()
 	a.applySettings()
+	// The list of another directory: what it holds is what it can open.
+	a.refreshMissing()
+	a.listWatched = false
+	if stop := a.listWatchStop; stop != nil {
+		stop()
+		a.listWatchStop = nil
+	}
 	return nil
 }
 
@@ -641,7 +741,7 @@ func (a *app) forgetEverything() {
 	a.open, a.closed, a.active = nil, nil, ""
 	a.envOpen, a.envID, a.envName = false, "", ""
 	a.foldersClosed, a.menus = nil, nil
-	a.search, a.kindFilter, a.panelMode = "", "", panelRequests
+	a.search, a.kindFilter = "", ""
 }
 
 // saveNewCollection creates the collection the dialog names, or renames the
@@ -743,6 +843,7 @@ func (a *app) openRequest(collectionID string, r savedRequest) {
 		t.method = r.Method
 	}
 	t.url = r.URL
+	t.protocol = r.Protocol
 	t.params.Rows = rowsFromSaved(r.Params)
 	t.headers.Rows = rowsFromSaved(r.Headers)
 	t.form.Rows = rowsFromSaved(r.Form)
@@ -753,18 +854,27 @@ func (a *app) openRequest(collectionID string, r savedRequest) {
 	t.body.Set(r.Body)
 	t.path, t.folder = r.Path, store.ParentPath(r.Path)
 	t.markSaved()
+	// The pane that holds something opens first: a request with parameters shows
+	// them, one with only a body shows the body.
+	t.reqTab = t.firstPaneWithData()
 
 	a.openTab(ws, t, ws.active+1)
 }
 
-// openHistory opens a history entry in the active collection.
-func (a *app) openHistory(entry historyEntry) {
-	if a.active == "" {
-		return
+// firstPaneWithData is the first of the request's panes that holds what the
+// request was configured with, the parameters when it has none: parameters,
+// headers, then body.
+func (t *tab) firstPaneWithData() int {
+	if len(t.params.Enabled()) > 0 {
+		return 0
 	}
-	a.openRequest(a.active, savedRequest{
-		Name: entry.Title, Kind: entry.Kind, Method: entry.Method, URL: entry.URL,
-	})
+	if len(t.headers.Enabled()) > 0 {
+		return 1
+	}
+	if t.body.Len() > 0 || len(t.form.Enabled()) > 0 {
+		return 2
+	}
+	return 0
 }
 
 // addRequest opens a request of the given kind as a draft: nothing is written
@@ -777,7 +887,9 @@ func (a *app) addRequest(k kind, folderPath string) error {
 	t := newTab()
 	t.kind, t.collectionID, t.folder = k, a.active, folderPath
 	if k != kindREST {
-		t.method = ""
+		// A socket sends messages rather than a request body, in JSON by default.
+		t.method, t.bodyType = "", "json"
+		t.setBodyLanguage()
 	}
 	ws := a.space()
 	a.openTab(ws, t, ws.active+1)
@@ -825,9 +937,15 @@ func savedFromTab(t *tab) savedRequest {
 		Params:   rowsToSaved(t.params.Rows),
 		Headers:  rowsToSaved(t.headers.Rows),
 		BodyType: t.bodyType,
+		Protocol: t.protocol,
 	}
 	// A file keeps what its format edits: the text of a code body, the rows of
 	// an encoded one.
+	if t.kind != kindREST {
+		// A socket's message is the body it sends, in whatever format it reads.
+		req.Body = t.body.String()
+		return req
+	}
 	switch bodyFormatOf(t.bodyType).Edits {
 	case editsRows:
 		req.Form = rowsToSaved(t.form.Rows)
@@ -936,7 +1054,8 @@ func (a *app) resolvedMode() design.Mode {
 // accent is the accent choice in use.
 func (a *app) accentColor() design.Accent { return design.AccentByName(a.accent) }
 
-// applySettings takes the appearance, accent and language the last run kept.
+// applySettings takes the appearance, accent, language, response limit and
+// update choice the last run kept.
 func (a *app) applySettings() {
 	s := a.store.Settings
 	a.mode = design.ParseMode(s.Mode)
@@ -946,18 +1065,36 @@ func (a *app) applySettings() {
 	if s.Language != "" {
 		a.language = s.Language
 	}
+	a.maxResponseMB = float64(responseLimitMB(s.MaxResponseMB))
+	a.autoUpdate = s.AutoUpdate
 	a.applied = design.Mode(-1) // the theme is built again with them
 }
 
-// rememberSettings keeps the appearance, accent and language for the next
-// run.
+// rememberSettings keeps the appearance, accent, language, response limit and
+// update choice for the next run.
 func (a *app) rememberSettings() error {
 	a.store.Settings = settings{
-		Mode:     a.mode.Key(),
-		Accent:   a.accent,
-		Language: a.language,
+		Mode:          a.mode.Key(),
+		Accent:        a.accent,
+		Language:      a.language,
+		MaxResponseMB: int(math.Round(a.maxResponseMB)),
+		AutoUpdate:    a.autoUpdate,
 	}
 	return a.store.SaveSettings()
+}
+
+// responseLimit is how much of a response the app reads, in bytes.
+func (a *app) responseLimit() int64 {
+	return int64(responseLimitMB(int(math.Round(a.maxResponseMB)))) << 20
+}
+
+// responseLimitMB is a cap in megabytes, the default when it is not a number
+// the settings can hold.
+func responseLimitMB(mb int) int {
+	if mb < minResponseLimitMB {
+		return defaultResponseLimitMB
+	}
+	return min(mb, maxResponseLimitMB)
 }
 
 // palette returns the colors of this frame.
@@ -1029,50 +1166,91 @@ func (a *app) send(c *ui.Context) {
 		return
 	}
 	t.loading, t.resp = true, nil
-	run := func() { a.apply(t, req.Execute(context.Background(), built)) }
+	t.sentHeaders = built.Header.Clone()
+	limit := a.responseLimit()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.cancel = cancel
 	if a.after == nil {
-		run()
+		// No window to hand the work to: the test runs it here.
+		res := req.Execute(ctx, built, limit)
+		cancel()
+		a.apply(t, prepareResponse(res))
 		return
 	}
-	go func() { a.after(run) }()
+	// The request and what its body looks like are worked out on this goroutine:
+	// a server that never answers holds only its own tab, and the window keeps
+	// drawing and sending.
+	go func() {
+		defer cancel()
+		sh := prepareResponse(req.Execute(ctx, built, limit))
+		a.after(func() { a.apply(t, sh) })
+	}()
 }
 
-// apply stores a finished response in its tab, records it in the history,
-// and shows the body read-only with JSON highlighting when it is JSON.
-func (a *app) apply(t *tab, res *response) {
+// cancelSend stops the request of a tab, if it is waiting for one: the pane
+// shows the cancelled request rather than the answer that may still come.
+func (a *app) cancelSend(t *tab) {
+	if t == nil || t.cancel == nil {
+		return
+	}
+	t.cancel()
+}
+
+// apply puts a response into its tab, on the window's thread: what it holds,
+// and the text the editor shows.
+func (a *app) apply(t *tab, sh *shown) {
+	t.dropResponse()
+	t.cancel = nil
+	res := sh.res
 	t.resp, t.loading = res, false
 	if res == nil {
 		return
 	}
-	_ = a.store.AddHistory(historyEntry{
-		Method: t.method,
-		URL:    t.url,
-		Status: res.Status,
-		At:     time.Now(),
-		Title:  t.title,
-		Kind:   t.kind,
-	})
 	if res.Err != nil {
+		t.rawEdit.Buffer.Set("")
 		return
 	}
-	lang := languageForResponse(res.Headers.Get("Content-Type"), res.Body)
-	t.respEdit.Buffer.SetLanguage(lang)
-	if lang == nil {
-		t.respEdit.Buffer.Set(res.Body)
-		return
+	t.view, t.picture, t.pictureNote, t.mediaErr = sh.view, sh.picture, sh.pictureNote, sh.mediaErr
+	t.audio = sh.audio
+	t.rawEdit.Buffer.Set(rawBodyText(res))
+	if sh.view != bodyText {
+		return // a picture, a sound or a file: the editor has nothing to show
 	}
-	// A JSON body is indented as it comes in: the server sends it over one
-	// line more often than not, and the pane reads it as code.
-	t.respEdit.Buffer.Set(prettyResponse(res.Body))
+	t.respEdit.Buffer.SetLanguage(sh.lang)
+	t.respEdit.Buffer.Set(sh.text)
 }
 
-// languageForResponse is the syntax a response is shown in: JSON when the
-// server says so, or when the body parses as JSON whatever it says.
+// showResponse works out what a response looks like and puts it in the tab on
+// this thread: a test or a shot makes a response rather than waiting for one.
+func (a *app) showResponse(t *tab, res *response) {
+	a.apply(t, prepareResponse(res))
+}
+
+// languageForResponse is the syntax a response is shown in, by what the server
+// says it holds: JSON when the server says so or the body parses as JSON, XML
+// and HTML for the markup types, and the plain text editor for anything else.
 func languageForResponse(contentType, body string) *editor.Language {
 	if isJSON(contentType, body) {
-		return editor.LanguageFor("response.json")
+		return editor.LanguageNamed("JSON")
 	}
-	return nil
+	kind := mediaType(contentType)
+	switch {
+	case kind == "text/html":
+		return editor.LanguageNamed("HTML")
+	case strings.Contains(kind, "xml"):
+		return editor.LanguageNamed("XML")
+	case kind == "text/css":
+		return editor.LanguageNamed("CSS")
+	case kind == "text/javascript", kind == "application/javascript":
+		return editor.LanguageNamed("JavaScript")
+	case kind == "text/markdown":
+		return editor.LanguageNamed("Markdown")
+	case kind == "application/yaml", kind == "text/yaml":
+		return editor.LanguageNamed("YAML")
+	case kind == "application/sql":
+		return editor.LanguageNamed("SQL")
+	}
+	return nil // plain text: the editor with no syntax of its own
 }
 
 // prettyResponse indents a JSON body, keeping it as it came when it does not

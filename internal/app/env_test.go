@@ -139,7 +139,7 @@ func TestEnvironmentVariableRowDeletesItself(t *testing.T) {
 		t.Errorf("variables %+v before saving, want them left as they were", env.Vars)
 	}
 
-	if err := tt.Click("保存"); err != nil {
+	if err := tt.Click("保存环境"); err != nil {
 		t.Fatal(err)
 	}
 	env = a.store.Environment(a.envID)

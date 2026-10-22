@@ -68,6 +68,29 @@ func (a *app) nameOfCollection(id string) string {
 	return ""
 }
 
+// askToForgetMissingCollection asks before a collection whose directory is gone
+// leaves the list: there is nothing left to open, and its folder is not there to
+// keep either.
+func (a *app) askToForgetMissingCollection(id string) {
+	name := a.nameOfCollection(id)
+	if name == "" {
+		return
+	}
+	a.ask(confirm{
+		title:  "集合不存在",
+		body:   "「" + name + "」的文件夹已不在数据目录里，无法打开。是否把它从列表中移除？",
+		action: "移除集合",
+		danger: true,
+		run: func(c *ui.Context) {
+			if err := a.deleteCollection(id); err != nil {
+				c.Toast("移除失败：" + err.Error())
+				return
+			}
+			delete(a.missing, id)
+		},
+	})
+}
+
 // confirmModal draws the question, and runs its action on a yes.
 func (a *app) confirmModal(c *ui.Context, p design.Palette) {
 	q := &a.question

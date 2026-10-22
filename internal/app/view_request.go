@@ -8,9 +8,10 @@ import (
 	"github.com/egoist/mygo/ui/editor"
 )
 
-// requestTabs are the panes of a request. Authorization, Pre-request, Scripts
-// and Tests are not shown yet: they have nothing behind them.
-var requestTabs = []string{"Params", "Headers", "Body"}
+// requestTabs are the panes of a request, in the language of the interface.
+// Authorization, Pre-request, Scripts and Tests are not shown yet: they have
+// nothing behind them.
+var requestTabs = []string{"参数", "请求头", "请求体"}
 
 var methods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
@@ -34,14 +35,23 @@ func (a *app) requestLine(c *ui.Context, p design.Palette, t *tab) {
 		ui.TextInput(c, &t.url).Grow(1).Height(design.RequestRowHeight).
 			Placeholder("输入请求 URL").Font("monospace")
 		if t.loading {
-			ui.Button(c, "发送中…").Height(design.RequestRowHeight)
+			// The request is waiting: the same button stops it.
+			a.iconButton(c, p, iconButtonSpec{label: "取消", name: "取消请求", icon: icons.Close,
+				run: func() { a.cancelSend(t) }})
+			a.saveButton(c, p)
 			return
 		}
-		if ui.PrimaryButton(c, "发送").Height(design.RequestRowHeight).
-			Cursor(ui.CursorPointer).Clicked() {
-			a.send(c)
-		}
+		a.iconButton(c, p, iconButtonSpec{label: "发送", name: "发送请求", icon: icons.Send,
+			run: func() { a.send(c) }})
+		a.saveButton(c, p)
 	})
+}
+
+// saveButton keeps the request in its interface file, asking where it goes when
+// it has none: the same as Ctrl+S.
+func (a *app) saveButton(c *ui.Context, p design.Palette) {
+	a.iconButton(c, p, iconButtonSpec{label: "保存", name: "保存接口", icon: icons.Save, plain: true,
+		run: func() { a.saveCurrent(c) }})
 }
 
 // methodBox is the method button and the menu of methods it opens.
@@ -84,15 +94,22 @@ func (a *app) requestTabStrip(c *ui.Context, p design.Palette, t *tab) {
 
 // requestTab draws one tab with the accent line under the selected one.
 func (a *app) requestTab(c *ui.Context, p design.Palette, t *tab, i int, name string, selected bool) {
+	paneTab(c, p, name, selected, func() { t.reqTab = i })
+}
+
+// paneTab draws a pane's tab with the accent line under the selected one: the
+// panes of a request and of a socket share the look.
+func paneTab(c *ui.Context, p design.Palette, name string, selected bool, choose func()) {
 	color, line := p.TextMuted, p.Background
 	if selected {
 		color, line = p.Text, p.Accent
 	}
-	ui.Column(c).Gap(4).Children(func() {
-		if ui.ButtonBase(c).Label(name).Padding(6, 8).Cursor(ui.CursorPointer).Children(func() {
-			ui.Text(c, name).FontSize(design.FontSizeBody).TextColor(color).SingleLine()
-		}).Clicked() {
-			t.reqTab = i
+	ui.Column(c).Shrink(0).Gap(4).Children(func() {
+		if ui.ButtonBase(c).Label(name).Padding(6, 8).Shrink(0).Cursor(ui.CursorPointer).
+			Children(func() {
+				ui.Text(c, name).FontSize(design.FontSizeBody).TextColor(color).SingleLine()
+			}).Clicked() {
+			choose()
 		}
 		ui.Row(c).Height(2).FillWidth().Background(line)
 	})
@@ -122,8 +139,12 @@ func (a *app) bodyPanel(c *ui.Context, p design.Palette, t *tab) {
 	format := bodyFormatOf(t.bodyType)
 	ui.Column(c).FillWidth().FillHeight().Gap(design.RowGap).Children(func() {
 		ui.Row(c).FillWidth().Gap(2).AlignItems(ui.Center).Children(func() {
-			a.bodyFormatStrip(c, p, t)
-			ui.Row(c).Grow(1)
+			// The formats scroll before the Content-Type they send with: at a
+			// narrow window nine of them do not fit, and squeezing one to a
+			// sliver says nothing of its format.
+			noScrollbars(ui.ScrollHorizontal(c)).Grow(1).Height(28).Children(func() {
+				a.bodyFormatStrip(c, p, t)
+			})
 			if format.MIME != "" {
 				ui.Text(c, format.MIME).FontSize(design.FontSizeTiny).
 					TextColor(p.TextMuted).Selectable()
@@ -164,6 +185,16 @@ func (a *app) bodyHint(c *ui.Context, p design.Palette, text string) {
 	})
 }
 
+// bodyPillPadding is the room a format pill leaves beside its label.
+const bodyPillPadding float32 = 10
+
+// bodyPillWidth is how wide a format pill draws: its label and the room the
+// paddings take, with a hair more. The toolkit rounds the last fraction away and
+// ellipsizes a label that just fits, which read 「X…」 for XML.
+func bodyPillWidth(c *ui.Context, label string) float32 {
+	return 2*bodyPillPadding + measureText(c, label, design.FontSizeBody, 400) + tabWiggle
+}
+
 // bodyFormatStrip is the row of formats the Body tab offers: the one in use
 // filled with the accent, as Hoppscotch draws it.
 func (a *app) bodyFormatStrip(c *ui.Context, p design.Palette, t *tab) {
@@ -174,7 +205,8 @@ func (a *app) bodyFormatStrip(c *ui.Context, p design.Palette, t *tab) {
 			if selected {
 				color, bg = p.AccentText, p.Accent
 			}
-			btn := ui.ButtonBase(c).Height(26).Padding(0, 10).Radius(13).
+			btn := ui.ButtonBase(c).Height(26).Padding(0, bodyPillPadding).Radius(13).
+				MinWidth(bodyPillWidth(c, format.Label)).
 				Background(bg).Label("请求体格式 " + format.Label).Cursor(ui.CursorPointer)
 			if !selected && btn.Hovered() {
 				btn.Background(p.SurfaceHover)

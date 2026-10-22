@@ -10,7 +10,6 @@ type (
 	savedRequest = store.Request
 	savedRow     = store.Row
 	environment  = store.Environment
-	historyEntry = store.HistoryEntry
 	settings     = store.Settings
 	kind         = store.Kind
 	dataStore    = store.Store

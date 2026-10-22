@@ -42,7 +42,7 @@ func TestWorkspaceControlsShowPointer(t *testing.T) {
 		"筛选类型")
 
 	// The body panel and its wand are built only once their tab is chosen.
-	if err := tt.Click("Body"); err != nil {
+	if err := tt.Click("请求体"); err != nil {
 		t.Fatal(err)
 	}
 	wantPointer(t, tt, "美化请求体")
@@ -72,7 +72,7 @@ func TestMenuItemsShowPointer(t *testing.T) {
 
 	// The format row is always there: its pills take the pointer like any
 	// other button.
-	if err := tt.Click("Body"); err != nil {
+	if err := tt.Click("请求体"); err != nil {
 		t.Fatal(err)
 	}
 	wantPointer(t, tt, "请求体格式 JSON", "请求体格式 form-data")

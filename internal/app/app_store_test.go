@@ -46,6 +46,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	a := newApp()
 	a.store = s
 	a.mode, a.accent, a.language = design.Dark, "Blue", "简体中文"
+	a.maxResponseMB = 64
 	if err := a.rememberSettings(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,5 +69,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if got := restarted.palette().Accent; got != design.AccentByName("Blue").Base {
 		t.Errorf("palette accent %v after a restart, want Blue", got)
+	}
+	if got := restarted.responseLimit(); got != 64<<20 {
+		t.Errorf("response limit %d after a restart, want 64 MB", got)
 	}
 }

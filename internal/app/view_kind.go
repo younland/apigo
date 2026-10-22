@@ -26,15 +26,16 @@ func kindIcon(k kind) *ui.SVG {
 	}
 }
 
-// kindRow is one line of a kind menu: the icon, the name, and the choice. The
-// menu it fills draws the panel around it.
-func (a *app) kindMenu(c *ui.Context, p design.Palette, choose func(kind)) {
+// kindMenu lists every kind of request. prefix starts the name a line is found
+// by, so a menu standing beside another list of names finds its own lines.
+func (a *app) kindMenu(c *ui.Context, p design.Palette, prefix string, choose func(kind)) {
 	ui.Column(c).FillWidth().Gap(2).Children(func() {
 		for _, k := range store.RequestKinds {
-			row := menuRow(ui.ButtonBase(c).Height(28).Label(store.KindName(k)).Justify(ui.Start).
+			name := store.KindName(k)
+			row := menuRow(ui.ButtonBase(c).Height(28).Label(prefix+name).Justify(ui.Start).
 				Padding(0, 8).Gap(8).Cursor(ui.CursorPointer).Children(func() {
 				ui.Icon(c, kindIcon(k)).FontSize(13).TextColor(p.TextMuted)
-				ui.Text(c, store.KindName(k)).FontSize(design.FontSizeBody).
+				ui.Text(c, name).FontSize(design.FontSizeBody).
 					TextColor(p.TextSecondary).SingleLine()
 			}), p)
 			if row.Clicked() {

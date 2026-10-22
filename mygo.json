@@ -1,9 +1,12 @@
 {
   "name": "apigo",
-  "identifier": "com.example.apigo",
+  "identifier": "io.github.younland.apigo",
   "version": "0.1.0",
+  "copyright": "© 2026 younland",
   "out": "build",
   "linux": {
+    "maintainer": "younland <younland@users.noreply.github.com>",
+    "comment": "基于 MyGo 原生 UI 的接口调试工具：REST 与 WebSocket",
     "webview": false
   }
 }

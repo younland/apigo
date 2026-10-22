@@ -56,15 +56,19 @@ func WriteYAML(path string, v any) error {
 
 // tmpRoot is where the temporary files of a directory's writes wait: the
 // collection the directory belongs to, the one holding apigo.yaml, or the
-// directory itself when it belongs to none.
+// directory itself when it belongs to none. It never climbs past the directory
+// it was given when nothing above holds apigo.yaml: a write of a collection's
+// own apigo.yaml, the first file of a collection, would otherwise wait in the
+// volume root.
 func tmpRoot(dir string) string {
+	start := dir
 	for {
 		if _, err := os.Stat(filepath.Join(dir, MetaFile)); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir {
-			return dir
+		if parent == dir || parent == "." || parent == string(filepath.Separator) {
+			return start
 		}
 		dir = parent
 	}

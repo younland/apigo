@@ -5,12 +5,19 @@ import (
 	"path/filepath"
 )
 
-// settings is what the app remembers between runs: the appearance, the
-// accent and the language, kept in one file of the data directory.
+// Settings is what the app remembers between runs: the appearance, the accent,
+// the language, how much of a response it reads, and whether it looks for a
+// newer version at startup, kept in one file of the data directory.
 type Settings struct {
 	Mode     string `yaml:"appearance,omitempty"`
 	Accent   string `yaml:"accent,omitempty"`
 	Language string `yaml:"language,omitempty"`
+	// MaxResponseMB caps a response body, in megabytes: zero keeps the
+	// default.
+	MaxResponseMB int `yaml:"maxResponseMB,omitempty"`
+	// AutoUpdate makes the app look for a newer version when it starts. It is
+	// off unless the reader turns it on: a check reaches the network.
+	AutoUpdate bool `yaml:"autoUpdate,omitempty"`
 }
 
 // settingsPath is the file the settings are kept in.

@@ -744,3 +744,102 @@ func TestFolderMenuRenames(t *testing.T) {
 		t.Errorf("tree %+v, want the folder renamed with its interface", col.Root.Folders)
 	}
 }
+
+// countTexts counts how many texts of the window read exactly s, so a test can
+// tell one place that names a kind from another.
+func countTexts(tt *ui.Tester, s string) int {
+	n := 0
+	for _, text := range tt.Texts() {
+		if text == s {
+			n++
+		}
+	}
+	return n
+}
+
+// TestKindRowsShowTheirIconOnly checks a request of another kind keeps the icon
+// of its kind alone in the tree and in its tab, rather than naming the kind
+// beside the name it already carries.
+func TestKindRowsShowTheirIconOnly(t *testing.T) {
+	a := testApp(t)
+	a.store.Collections[0].Root.Requests = append(a.store.Collections[0].Root.Requests,
+		savedRequest{Path: "socket", Name: "实时对话", Kind: kindWebSocket})
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+
+	// The active tab is the REST request, so the footer says REST: nothing else
+	// names the socket's kind.
+	if got := countTexts(tt, "WebSocket"); got != 0 {
+		t.Errorf("%d texts name the socket's kind, want the icon alone: %q", got, tt.Texts())
+	}
+	if !tt.HasText("请求 实时对话") {
+		t.Errorf("texts %q, want the socket in the tree", tt.Texts())
+	}
+
+	// Its own tab shows the icon too, leaving the kind to the footer.
+	a.addTabOfKind(a.space(), kindWebSocket)
+	tt.Frame()
+	if got := countTexts(tt, "WebSocket"); got != 1 {
+		t.Errorf("%d texts name the socket's kind, want the footer's alone: %q", got, tt.Texts())
+	}
+	if !tt.HasText("标签页 Untitled") {
+		t.Errorf("texts %q, want the socket's tab", tt.Texts())
+	}
+}
+
+// TestStartHintLinesUpItsActions checks the actions under the start hint start
+// on one left edge — the labels in one column and the keys in another — rather
+// than drifting with the width of each row, and that their lines keep one gap.
+func TestStartHintLinesUpItsActions(t *testing.T) {
+	a := treeApp(t)
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+
+	labels := []string{"新建接口", "打开已有接口", "发送请求", "保存接口"}
+	first, ok := tt.Find(labels[0])
+	if !ok {
+		t.Fatal("no label of the start hint")
+	}
+	for _, label := range labels[1:] {
+		rect, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("texts %q, want the label %q", tt.Texts(), label)
+		}
+		if rect.X != first.X {
+			t.Errorf("label %q starts at %.1f, want it on the edge of %q at %.1f",
+				label, rect.X, labels[0], first.X)
+		}
+		if rect.Y-first.Y == 0 {
+			t.Errorf("label %q is on the line of %q, want a line of its own", label, labels[0])
+		}
+	}
+	last, ok := tt.Find(labels[3])
+	if !ok {
+		t.Fatalf("texts %q, want the label %q", tt.Texts(), labels[3])
+	}
+	if gap := (last.Y - first.Y) / 3; gap < 20 {
+		t.Errorf("the lines are %.1f apart, want room between them", gap)
+	}
+
+	// The tips and keys beside the labels share an edge of their own, though
+	// the labels they follow differ in length.
+	tip, ok := tt.Find("左侧目录行尾的 +")
+	if !ok {
+		t.Fatalf("texts %q, want the tip of the first line", tt.Texts())
+	}
+	other, ok := tt.Find("点击左侧的接口")
+	if !ok {
+		t.Fatalf("texts %q, want the tip of the second line", tt.Texts())
+	}
+	key, ok := tt.Find("Ctrl")
+	if !ok {
+		t.Fatalf("texts %q, want the key of the third line", tt.Texts())
+	}
+	if other.X != tip.X || key.X != tip.X {
+		t.Errorf("the tips and keys start at %.1f and %.1f, want them on the edge of %.1f",
+			other.X, key.X, tip.X)
+	}
+	if tip.X <= first.X {
+		t.Errorf("the tips start at %.1f, want them beside the labels at %.1f", tip.X, first.X)
+	}
+}

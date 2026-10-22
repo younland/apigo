@@ -2,6 +2,7 @@ package app
 
 import (
 	"apigo/internal/design"
+	"apigo/internal/icons"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -34,6 +35,63 @@ func menuRow(row ui.Element, p design.Palette) ui.Element {
 		row.Background(p.SurfaceHover)
 	}
 	return row
+}
+
+// selectSpec is the trigger of a list of choices: the name it is found by, the
+// text it shows, and how wide it is.
+type selectSpec struct {
+	name  string
+	label string
+	width float32
+}
+
+// selectTrigger draws the control that opens a list of choices. Every picker of
+// the app draws this way — the label at the left, the chevron at the right, the
+// border of the other fields and the page behind it — so they read as one.
+func selectTrigger(c *ui.Context, p design.Palette, spec selectSpec) ui.Element {
+	btn := ui.ButtonBase(c).Width(spec.width).Height(design.TabStripHeight-12).
+		Padding(0, 10).MinWidth(0).Background(p.Surface).Radius(design.Radius).
+		Border(design.BorderWidth, p.Border).Justify(ui.SpaceBetween).
+		Label(spec.name).Cursor(ui.CursorPointer)
+	if btn.Hovered() {
+		btn.Background(p.SurfaceHover)
+	}
+	btn.Children(func() {
+		ui.Text(c, spec.label).FontSize(design.FontSizeBody).TextColor(p.TextSecondary).SingleLine()
+		ui.Icon(c, icons.Chevron).FontSize(12).TextColor(p.TextMuted)
+	})
+	return btn
+}
+
+// selectChoice is one line of a list of choices: the name it is found by, the
+// text it shows, whether it is the one in force, and what picking it does.
+type selectChoice struct {
+	name   string
+	label  string
+	chosen bool
+	run    func()
+}
+
+// selectChoiceRow draws one choice. The one in force is ticked, reads in the
+// accent and is tinted; the others keep the tick's room, so labels line up.
+func selectChoiceRow(c *ui.Context, p design.Palette, choice selectChoice) {
+	row := menuRow(ui.ButtonBase(c).Height(28).Label(choice.name).Justify(ui.Start).
+		Gap(8).Padding(0, 8).Cursor(ui.CursorPointer).Children(func() {
+		text := p.TextSecondary
+		if choice.chosen {
+			ui.Icon(c, icons.Check).FontSize(12).TextColor(p.Accent)
+			text = p.Accent
+		} else {
+			ui.Row(c).Width(12)
+		}
+		ui.Text(c, choice.label).FontSize(design.FontSizeBody).TextColor(text).SingleLine()
+	}), p)
+	if choice.chosen {
+		row.Background(p.Accent.Alpha(accentTint))
+	}
+	if row.Clicked() {
+		choice.run()
+	}
 }
 
 // popoverMenu draws a menu under an anchor the way Hoppscotch draws its own:

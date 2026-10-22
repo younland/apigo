@@ -44,15 +44,18 @@ func (a *app) view(c *ui.Context) {
 // collectionWorkspace draws the active collection: the interfaces tree on
 // the left, and the request panel on the right, whose top row is the tabs of
 // the open requests over the request and response panes — or, with no tab
-// open at all, a pane saying what to do.
+// open at all, a pane saying what to do. The status bar folds the tree away,
+// for the room a narrow window needs.
 func (a *app) collectionWorkspace(c *ui.Context, p design.Palette) {
 	ws := a.space()
 	// Ctrl+S saves the request the workspace shows, whatever its kind.
 	c.OnShortcut(ui.Cmd, ui.KeyS, func() { a.saveCurrent(c) })
 	ui.Column(c).Grow(1).FillWidth().Padding(0, design.WorkspacePadding).Children(func() {
 		ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Start).Children(func() {
-			a.requestsPanel(c, p)
-			ui.Row(c).Width(design.BorderWidth).FillHeight().Background(p.Divider)
+			if !a.sidebarCollapsed {
+				a.requestsPanel(c, p)
+				ui.Row(c).Width(design.BorderWidth).FillHeight().Background(p.Divider)
+			}
 			ui.Column(c).Grow(1).FillHeight().Children(func() {
 				// A collection opens with no request tab at all: the pane says
 				// what to do rather than showing an empty request, and the
@@ -69,20 +72,27 @@ func (a *app) collectionWorkspace(c *ui.Context, p design.Palette) {
 	})
 }
 
-// workspace splits the room into the request pane above the response pane,
-// as Hoppscotch does.
+// workspace splits the room into the request pane above the response pane, as
+// Hoppscotch does; a socket shows its log under the message instead.
 func (a *app) workspace(c *ui.Context, p design.Palette) {
 	t := a.current()
 	if t == nil {
 		return
 	}
 	ui.SplitVerticalPercent(c, &a.percent, func() {
-		if t.kind != kindREST {
+		switch t.kind {
+		case kindREST:
+			a.request(c, p)
+		case kindWebSocket:
+			a.socketPane(c, p, t)
+		default:
 			a.emptyKind(c, p, t.kind)
+		}
+	}, func() {
+		if t.kind == kindWebSocket {
+			a.socketLogPane(c, p, t)
 			return
 		}
-		a.request(c, p)
-	}, func() {
 		a.response(c, p)
 	}).Grow(1)
 }
