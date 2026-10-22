@@ -80,7 +80,7 @@
   - **触发信号**：把 40 多个根目录文件搬进 `internal/` 时，几百处类型/方法引用要跟着改名；手工扫一遍几乎必然漏。
   - **根因/约束**：Go 的 `main` 包不能被 import，功能要下沉就得成包；跨包就只能用导出的名字，而 `folder`/`collection`/`response` 这类名字在 app 里遍地都是。类型别名（`type folder = store.Folder`）能让 app 侧的 `folder{...}`、`e.Folder` 一行都不用改，被挡住的只有「未导出方法/字段」和「包级函数」。
   - **正确做法**：分批下沉，每批结束都要 `go build ./...` 绿：①`widgets` 直接搬；②`internal/store`（13 个 `service_*.go`）——包内用「整词重命名」把类型/方法导出，app 侧加 `store_alias.go` 别名 + 只改 `a.store.X` 这类方法调用；③`internal/req`（`http.go`/`formats.go`/`vars.go`）+ `req_alias.go`；④其余全进 `internal/app`，根目录只留 `main.go`（`package main` 里 `app.Run()`）。`//go:embed` 不能跨目录，字体单独成 `internal/assets`（`assets` 由 `run.go` 空导入触发 `init()` 注册）。测试按被测包落位：纯 store 的进 `internal/store`，req 的进 `internal/req`，视图测试留 `internal/app`。
-  - **验证方式**：`task check` 绿（`mygo vet` 改成 `./...`，否则只看根包）；`APIGO_SHOTS=... go test -run TestShots .` 与重构前的图逐张 `cmp`，应**逐字节一致**（纯搬家不改行为）；字体没注册会立刻体现在截图的字形上。
+  - **验证方式**：`task check` 绿（`mygo vet` 改成 `./...`，否则只看根包）；`APIGO_SHOTS=... go test -run TestShots ./internal/app/` 与重构前的图逐张 `cmp`，应**逐字节一致**（纯搬家不改行为）；字体没注册会立刻体现在截图的字形上。
   - **适用范围**：`internal/**`、根 `main.go`、`Taskfile.yml`（`mygo vet ./...`）、`README.md` 目录结构、`AGENTS.md` 的经验条目路径。
 
 - **标题**：`ui.Row` 默认把子元素垂直居中，内容不足满高时会被"居中"到窗口中部
@@ -100,7 +100,7 @@
   - **根因/约束**：`coreButtonBase = coreRow(c).Center()`。
   - **正确做法**：`.Justify(ui.Start)`（垂直居中保留）。
   - **验证方式**：树/导航项图标左缘对齐。
-  - **适用范围**：集合树项、历史列表项、设置导航项等 FillWidth 的 ButtonBase。
+  - **适用范围**：集合树项、设置导航项等 FillWidth 的 ButtonBase。
 - **标题**：离屏渲染（`ui.Render`/`ui.Tester`）与真实窗口可能有差异，关键界面要真实窗口截图核验
   - **触发信号**：Tester 渲染正常，真实窗口布局错乱。
   - **根因/约束**：真实窗口的字体回退、DPI、动画帧状态与 Tester 不完全一致。
@@ -217,6 +217,8 @@
   - **正确做法**：同一行的多种新建动作收进一个 `+` 菜单（`folderAddButton`：先「新建文件夹」，分隔线后是类型菜单），菜单项的无障碍名带上是哪个文件夹（`在<文件夹>里新建文件夹`）；跨整棵树的动作（类型筛选）放在「根目录」行尾，只有一行。
   - **验证方式**：`TestRootRowHostsTreeTools`（筛选在 `+` 左侧同一行、菜单能建文件夹）、`TestFolderTreeAddsAndNavigates`。
   - **适用范围**：`internal/app/view_requests.go` 的 `folderRow`/`folderAddButton`/`kindFilterButton`。
+  - **补充（标签条的 `+` 同一个道理）**：请求标签条的 `+` 也先弹类型菜单（`newTabButton` 里 `PopoverBase` + `kindMenu(c, p, "新建 ", …)`，**没有「新建文件夹」**——标签条里没有文件夹可建），选完走 `addTabOfKind`（非 REST 清空 method、`bodyType` 默认 json）。因为菜单行与别处的类型名同文案，`kindMenu` 多了一个 `prefix` 参数：标签条传 `"新建 "`，树里的菜单传 `""`，测试点 `新建 WebSocket` 不会撞上别处的 `WebSocket`。
+  - **补充（非 REST 只留图标）**：树行与标签页前那一格都由 `kindBadge`/`tabBadge` 画——REST 画「类型图标 + 彩色方法名」，其它类型**只画类型图标**（标签用的是 `tabKindIcon = 12`，树行 13），因为「WebSocket / GraphQL」这种字既长又和名字抢宽度；`requestTabChrome` 的宽度也要跟着换成 `tabBadgeWidth`，否则标题会被算错而挤掉图标或 ×。
 - **标题**：应用内菜单用 `PopoverBase` 自绘，右键要用 `RightClicked()` 落在真正被点的元素上
   - **触发信号**：系统菜单（`ContextMenu`）里没有图标、样式与其他菜单不一致；换成 popover 后右键点标签页菜单不出现。
   - **根因/约束**：`ContextMenu` 是平台菜单（纯文本）；`PopoverBase(anchor, open, fn)` 只是按 `*open` 显示面板，不会自己响应右键；`RightClicked()` 报告的是指针下的那个元素，不会向祖先冒泡（`ContextMenu` 才会）。
@@ -264,19 +266,37 @@
   - **触发信号**：换了字体后某些文字变成 `PO…`/`Untitl…`；或某平台窗口里字体没变、启动日志报注册失败。
   - **根因/约束**：`ui.RegisterFont(data, family)` 只把字体加进文本引擎；要全局生效必须写进 `ui.Theme.Font`（`design.Theme` 里 `t.Font = design.FontFamily`），否则只有显式 `.Font(family)` 的元素用它。系统没有可注册字体的文本引擎时（stub 引擎、部分 CI）注册会返回错误。
   - **正确做法**：字体文件放 `resources/`，`internal/assets/font.go` 里 `//go:embed` 后 `init()` 注册，失败只 `log.Printf` 不退出（主题仍写 family，绘制时回落系统字体）；测试用 `fontReady` 区分"平台不支持"与"嵌入坏了"（`TestInterfaceFontEmbedded` 在 no-font 平台上 `Skip`）。字体变宽会挤掉原本"刚好够"的文字——固定宽度区域要留余量（标签页给了 `design.TabMinWidth`）。
-  - **验证方式**：`TestInterfaceFontEmbedded`（嵌入文件名数字节 + `FontFamilies()` 里为本应用注册）、`TestThemeFollowsPalette`（主题 family）、`APIGO_SHOTS=docs/shots/<m> go test -run TestShots .` 出图核对字形与截断。
+  - **验证方式**：`TestInterfaceFontEmbedded`（嵌入文件名数字节 + `FontFamilies()` 里为本应用注册）、`TestThemeFollowsPalette`（主题 family）、`APIGO_SHOTS=docs/shots go test -run TestShots ./internal/app/` 出图核对字形与截断。
   - **适用范围**：`internal/assets/font.go`、`internal/design`（`FontFamily`/`Theme`）、所有固定宽度的文字容器；可执行文件随之增大约字体大小。
-- **标题**：可选项（强调色/外观/语言）是调色板与主题的参数，别在常量里写死；改一个就落盘一份 settings.yaml
+- **标题**：「字体看着偏瘦」先分清是没生效还是字号，别急着换字体文件
+  - **触发信号**：用户说界面字体不是鸿蒙黑体、比样张瘦。样张是 Windows 字体查看器按 12–72 **pt** 绘的，界面是 12 DIP 正文 + 灰字。
+  - **根因/约束**：字体其实生效了——主题 `Font` 生效的证据是「同一段文字，走主题（不写 `.Font`）与显式 `.Font(design.FontFamily)` 的墨量完全相等，与系统字体不等」（探针：40 px 下 3222 / 3222 / 3470 个暗像素）。同样的字重，可变字体 `wght` 400→700 墨量 1929→2706，说明 DirectWrite 拿的是真实实例、不是合成粗。真正显瘦的是 ①正文只有 12 DIP（Hoppscotch 采样值），1 px 竖笔落在半像素覆盖上变中灰；②MyGo 走 DirectWrite 的灰度覆盖（`textureClearType3x1` 三通道取平均），字体查看器是 ClearType 次像素，更「厚」；③大量标签用 `TextSecondary/TextMuted` 灰；④同字号下鸿蒙黑体的墨量比系统 UI 字体少约 7%。
+  - **正确做法**：字号整体上调一档（`design.FontSizeBody` 12→13、`Tiny` 10→11、`Title` 14→15、`Display` 18→19、`LineHeight` 16→17），`SidebarWidth` 240→264 给变宽的树行留位，日志里的只读 code 用 `design.FontSizeBody - 1` 保持「比正文小一号」。全局字重没有主题开关（`ui.Theme` 只有 `Font`/`FontSize`），想整体加粗只能逐处 `.FontWeight`，代价大、别做。
+  - **验证方式**：`TestEnvironmentPickerCentersInTheStrip` 之类尺寸断言全绿；`TestBodyFormatPillsShowTheirLabels` 钉住「胶囊给标签的余量必须严格大于标签的 advance」；截图逐张看窄条是否挤压（页签、日志行尾、树行、格式胶囊）。
+  - **适用范围**：`internal/design/tokens.go`（全部字号与 `SidebarWidth`）、`internal/app/socket.go`（日志 code 字号）、一切写死宽度的行。
+- **标题**：`c.MeasureText` 只在帧内有效，帧外返回 0——拿它写断言会「静默通过」
+  - **触发信号**：测试里 `measureText(ctx, ...)` 得到 0，`rect.W < want` 永远不成立，bug 在场而测试全绿。
+  - **根因/约束**：`*ui.Context` 只在 `view(c)` 那一帧里带着排版状态；`tt.Frame()` 之后再调 `c.MeasureText` 没有可量的引擎，返回 (0, 0)。
+  - **正确做法**：要在测试里算文字宽度，用 `ui.Shape(s, ui.Font{Family, Size, Weight})` 把 `Advance` 累加（与引擎排版同一套数字，帧外也能用）；确实要测渲染期数值时，在 `tt.Frame()` 里保存所需的值，别保存 ctx。
+  - **验证方式**：把被测实现临时改成「没有余量」（`MinWidth(0)`）跑一遍，测试必须变红；`TestBodyFormatPillsShowTheirLabels` 就是这么验的（改前 5 个胶囊报「leaves X for a label that takes X」）。
+  - **适用范围**：所有用 `ui.Tester` 量文字的断言（`internal/app/body_test.go`、`tabs_test.go`）。
+- **标题**：固定宽度行里「刚好够宽」的标签会被工具包取整成省略号，要显式 MinWidth 给 2 DIP 余量
+  - **触发信号**：某个短标签（`XML`）在胶囊行里显示成「X…」，而同样的字在别处正常；量出来的胶囊宽度恰好等于「标签 advance + 两侧内边距」。
+  - **根因/约束**：`ButtonBase` 的自然宽度 = 子元素 max-content + padding，工具包排版时按浮点宽度取整分配，子文本拿到的可用宽度正好等于自己的 advance 时判为「超了」，于是缩成「首字 + …」。
+  - **正确做法**：胶囊宽度用 `MinWidth(2*padding + measure + tabWiggle)`（`bodyPillWidth`，`tabWiggle = 2`，与标签页标题同一手法），并把整行格式胶囊包进 `noScrollbars(ui.ScrollHorizontal(c)).Grow(1)`：窗口窄时横向滚动，而不是把某个胶囊压成一条缝。
+  - **验证方式**：`TestBodyFormatPillsShowTheirLabels`（每个胶囊余量 > 标签 advance）；截图 `docs/shots/body-json.png` 里九个格式全名可见。
+  - **适用范围**：`internal/app/view_request.go`（格式胶囊）；任何「子文本 + 显式内边距 + 刚好够宽」的自绘按钮。
+- **标题**：可选项（强调色/外观/语言/响应体上限）是调色板与主题的参数，别在常量里写死；改一个就落盘一份 settings.yaml
   - **触发信号**：加了「强调色」设置却发现只有自绘文字变色、按钮还是绿色；设置改完重启就没了。
   - **根因/约束**：`Palette` 里的 `Accent/AccentHover/AccentPressed/AccentText` 原来写死在 `light`/`dark`/`black` 三个常量里；`ui.Theme` 也复制了一份，两个入口都得换。窗口主题按「外观+强调色」缓存（`themeAccent`），只比对外观会漏掉换色。
   - **正确做法**：`design.WithAccent`/`PaletteFor` 由基色派生阴影色与文字色，`Theme(m, accent)` 一并接收；`app.palette()` 与 `app.themeFor()` 都从这里取。设置在 `store.settings`（`settings.yaml`）里持久化，`internal/app/run.go` 启动 `load()` 后调 `applySettings()`；UI 改动处调 `saveSettingsOrToast(c)`，别静默失败。
-  - **验证方式**：`TestSettingsModal`（点背景/强调色后 `palette()` 与 `theme.Accent` 同步）、`TestSettingsRoundTrip`（重启后外观/强调色/语言还在）、`settings-accent` 截图。
+  - **验证方式**：`TestSettingsModal`（点背景/强调色后 `palette()` 与 `theme.Accent` 同步）、`TestSettingsRoundTrip`（重启后外观/强调色/语言/响应体上限还在）、`TestResponseLimitFollowsSettings`（上限的来源与默认）、`TestSendCutsTheBodyAtTheLimit`（超过上限截断并提示）、`settings-accent` 截图。
   - **适用范围**：`internal/design/accent.go`、`internal/design/theme.go`、`internal/app/app.go`（`palette`/`themeFor`/`applySettings`）、`internal/app/view_env.go` 的设置分区、`internal/store/service_settings.go`。
 - **标题**：手型指针要在每个可点击元素上显式 `.Cursor(ui.CursorPointer)`，给祖先容器设无效；`ui.Select` 的选项行设不了光标
   - **触发信号**：按钮/菜单项/标签页/树行悬浮时仍是箭头；给外层 `ui.Row` 设了 `.Cursor(CursorPointer)` 却只有空白处变手型；`ui.Select` 的触发器能改、展开后的选项永远是箭头。
   - **根因/约束**：`ui/runtime.go` 的 `updateCursor` 从指针下最内层元素向外找 cursor，但**停在最内层带 `flagClickable` 的元素**——该元素自己没设 cursor 就显示默认箭头，不再向外继承。`ui.Select` 的选项行由框架内部构建，没有可写的 `ui.Element`，所以它展开后永远是箭头；`ui.TextInput` 由框架负责 I 形光标。
   - **正确做法**：按钮类（`ui.Button`/`PrimaryButton`/`ButtonBase`/`Checkbox`/`PopoverBase` 锚点）逐处链式追加 `.Cursor(ui.CursorPointer)`，不要写 helper 包；需要选项也有手型的下拉用 `ui.SelectBase` 自建（`sel.Trigger` 加 cursor 与 `Hovered()` 换底色、`sel.Popup` 里 `sel.Item(v).Cursor(...)`，变更判断用 `sel.Trigger.Changed()`），弹出面板复用 `internal/app/view_menu.go` 的 `menuPanel`，选项加 `.Label("请求体格式 "+v)` 以免与触发器上的当前值撞名。`ui.Text`/`ui.Icon`/容器/`ui.Scroll`/`ui.TextInput`/`Modal` 背板一律不加。
-  - **验证方式**：`internal/app/cursor_test.go` 的 `TestWorkspaceControlsShowPointer`（发送、请求方法、标签页、关闭标签页、新建标签页、美化请求体、添加行、复选框、根目录行、新建接口、筛选类型）与 `TestMenuItemsShowPointer`（方法项、设置里的关闭/更换目录/强调色/跟随系统、`请求体格式 text`）；写法是 `tt.Find(label)` → `tt.Move(r.X+r.W/2, r.Y+r.H/2)` → `tt.Cursor() != ui.CursorPointer` 报错。改完顺手用 `APIGO_SHOTS=<临时目录> go test -run TestShots .` 与改动前的图逐张 `cmp`，除预期那一屏外应逐字节一致。
+  - **验证方式**：`internal/app/cursor_test.go` 的 `TestWorkspaceControlsShowPointer`（发送、请求方法、标签页、关闭标签页、新建标签页、美化请求体、添加行、复选框、根目录行、新建接口、筛选类型）与 `TestMenuItemsShowPointer`（方法项、设置里的关闭/更换目录/强调色/跟随系统、`请求体格式 text`）；写法是 `tt.Find(label)` → `tt.Move(r.X+r.W/2, r.Y+r.H/2)` → `tt.Cursor() != ui.CursorPointer` 报错。改完顺手用 `APIGO_SHOTS=<临时目录> go test -run TestShots ./internal/app/` 与改动前的图逐张 `cmp`，除预期那一屏外应逐字节一致。
   - **适用范围**：`internal/app/view_topbar.go`、`internal/app/view_home.go`、`internal/app/view_requests.go`、`internal/app/view_kind.go`、`internal/app/view_menu.go`、`internal/app/view_request.go`、`internal/app/view_response.go`、`internal/app/view_tabs.go`、`internal/app/view_env.go`、`internal/widgets/kvlist.go`；以及以后任何新增按钮、菜单项、列表行的地方。
 - **标题**：顶部集合标签被压成「测…」：`Row` 溢出时按 flex 压缩子元素，标签条要独立横向滚动
   - **触发信号**：窗口变窄或打开的集合变多后，集合标签只剩「测…」；同一个集合在宽窗口里显示完整。`ui.Tester` 里量到的标签 x 坐标出现 `238.03` 这种小数，也是同一个压缩。
@@ -373,15 +393,109 @@
   - **触发信号**：`task check` 之后 `git status` 里多出一个 `collections/` 目录；或者环境相关的用例突然报 `no environment in the list`（明明是内存里造的环境）。
   - **根因/约束**：`store.New("")` 的 `dir` 是空串，`collectionsDir()` 拼出的是相对当前工作目录的 `collections`，于是测试往仓库里写；而 `openCollection` 会 `reloadActive()`，只要 `collections/<id>` 真在磁盘上，就按磁盘内容覆盖内存里的集合、并先把该集合的环境清掉再重读；`saveTab` 的条件只是「标签有 `path` 与 `collectionID`」，`openTab`/`addTab` 前的 `leaveTab` 正好会调它。
   - **正确做法**：测试里的 store 目录一律给 `t.TempDir()`（`envApp` 就是这么做的）；`TestShots` 的 `demoApp` 用 `shotStore` 变量指向临时目录，并且**每个镜头一个子目录**（共用一份会让先跑的镜头写盘、后跑的镜头在 `openCollection` 时把内存里的集合读成磁盘上的那份，截图里集合名会退回目录名）；演示用的请求标签直接在内存里播种（`newTab()` + 设 `kind/collectionID/title/method/url/path` + `markSaved()` + `openTab`），不要为了「打开一个请求」去调 `openRequest`——那会把标签写回磁盘。
-  - **验证方式**：`task check` 与 `APIGO_SHOTS=... go test -run TestShots .` 之后 `git status --short` 里没有 `collections/`；`internal/app/env_test.go` 的用例不再依赖「当前目录里没有 `collections`」；截图顶部集合标签显示的是集合名（`示例接口集`），不是目录 id。
+  - **验证方式**：`task check` 与 `APIGO_SHOTS=... go test -run TestShots ./internal/app/` 之后 `git status --short` 里没有 `collections/`；`internal/app/env_test.go` 的用例不再依赖「当前目录里没有 `collections`」；截图顶部集合标签显示的是集合名（`示例接口集`），不是目录 id。
   - **适用范围**：所有 `*_test.go` 里构造 store/app 的地方，尤其 `internal/app/shot_test.go` 的 `demoApp`。
 
 - **标题**：升级 MyGo 小版本（0.5.5 → 0.6.0）的核对清单
   - **触发信号**：`go.mod` 里 mygo 的版本变了；升级后 `task check` 报某元素「outside the window」，或截图逐字节全变。
   - **根因/约束**：小版本也会改渲染与测量实现——0.6.0 只重绘变化、文本每元素只量一次、flexbox 按 Chrome 的方式布局、鼠标滚轮滚动带缓动；`ui.Tester.Click/ClickWith/RightClick` 从 0.6.0 起对**窗口外**元素返回 error（之前是静默点空）。所以「截图逐像素变」不等于坏了，而 `Tester` 的新报错几乎总是真 bug（元素被 flex 挤出盒子）。
-  - **正确做法**：`go get github.com/egoist/mygo@<版本>` + `go mod tidy` → `task check` → 把越界报错当真实 bug 修（别改用 `ClickAt` 绕过）→ `APIGO_SHOTS=docs/shots go test -run TestShots .` 出图，与上一版逐张比；用逐像素差异框定位，把「测试数据改名/临时路径」这类噪声与真正的布局位移分开 → 最后核对 `mygo.json` 的新配置项（如 0.6.0 的 `"linux": {"webview": false}`）。
+  - **正确做法**：`go get github.com/egoist/mygo@<版本>` + `go mod tidy` → `task check` → 把越界报错当真实 bug 修（别改用 `ClickAt` 绕过）→ `APIGO_SHOTS=docs/shots go test -run TestShots ./internal/app/` 出图，与上一版逐张比；用逐像素差异框定位，把「测试数据改名/临时路径」这类噪声与真正的布局位移分开 → 最后核对 `mygo.json` 的新配置项（如 0.6.0 的 `"linux": {"webview": false}`）。
   - **验证方式**：`task check` 全绿；截图差异只落在预期区域（本次是 setting 弹窗的示例路径与文字抗锯齿）；`go tool mygo build -platform linux/amd64` 后 `ar x *.deb` 看 control 的依赖。
   - **适用范围**：每次 mygo 版本变更；`internal/app/shot_test.go`、`go.mod`、`mygo.json`、`.github/workflows/*`。
+
+- **标题**：响应面板四个页签（预览/原始内容/响应头/请求头）：位图与播放器都是「有寿命的资源」，不能每帧重建
+  - **触发信号**：图片响应显示成一片空白或乱码；音频响应只有一行 `RIFF...` 文本；换一个请求后旧声音还在响；播放器进度条不动。
+  - **根因/约束**：`ui.DecodeBitmap` 的位图在 GPU 上常驻，「每一帧都解码一次」会不断建纹理（文档明确要求 make bitmaps once）；`audio.OpenStream` 拿到的 `*audio.Player` 持有解码器与输出，不 `Stop`/`Close` 就一直占着；播放器自己走时间，视图不主动要帧就画不出来；WAV 是内置的，MP3/Ogg 要 `_ "github.com/egoist/mygo/audio/mp3"` / `.../vorbis"` 空导入注册解码器（会引入 `go-mp3` 等间接依赖，要 `go get` 补 go.sum）。
+  - **正确做法**：`req.Response` 多带一份 `Raw []byte`（正文的原始字节，`Body` 仍是文本）；`app.apply` 里一次性 `t.dropResponse()` → `adoptResponse(res)`：分类（`responseBodyOf`：JSON/文本、`image/*`、`audio/*`、`video/*`、其它）→ 图片当场解码并记 `pictureNote`（`Bitmap.Size()`），音频当场 `OpenStream` 并 `SetVolume`；换响应时先关掉旧播放器；播放中在视图里 `c.After(200ms)` 让进度条与时钟跟上；视频没有解码器，如实给「文件卡 + 保存」而不是假装能播。
+  - **补充（页签与表头）**：页签名固定为 `预览`/`原始内容`/`响应头`/`请求头`（`responseTabNames`），页签与 `响应` 同一行（`responseMeta` 里画，宽度不够时靠右的状态块先让位）；`tab.respTab` 选页签：`respPreview`（`responseBodyView` 按 `t.view` 分派）、`respRaw`（`t.rawEdit` 只读缓冲，二进制用 `rawBodyText` 给一行说明）、`respHeaders`/`respRequestHeaders`（`headerList` 两列表格：名称小写、值右列，`sortedHeaderNames` 排序，`Selectable()` 可复制，页签名后 `countBadge` 给条数）。请求头来自 `send` 里 `t.sentHeaders = built.Header.Clone()`——发送那一刻的头，比事后从输入框重建更准（`Content-Type` 是 `BuildRequest` 加的）。
+  - **补充（下载）**：下载入口只有一个——meta 栏右端（状态码/耗时/大小之后）的 `icons.Download` 图标（`Label("下载响应")`），三种视图里不再各放一个按钮；`saveResponse` 通过可替换的 `a.pickDownloadDir`（生产是 `chooseDownloadDir` → `chooseFolder`：`mygo.App.Path(mygo.PathDownloads)` 作 `DefaultPath` 打开 `Directory: true` 的对话框，取消返回 `""`；测试注入临时目录或 `""` 模拟取消）拿目录，取消时**什么都不写也不提示**；文件名优先 `Content-Disposition`（`mime.ParseMediaType` 直接给解码后的 `filename`，含 `filename*`），其次 URL 末段，最后 `mime.ExtensionsByType` 补扩展名，并过一遍 `safeDownloadName`（去掉路径与 Windows 非法字符）；同名用 `名字 (2).ext` 编号；`pickDownloadDir` 为 nil 或响应没有字节时提示而不是 panic。
+  - **验证方式**：`response_body_test.go` 的 `TestResponseBodyOf`（九种 Content-Type/嗅探分类）、`TestDownloadName`（建议名/编码名/URL 名/类型补扩展名/去掉 `../`）、`TestResponseMetaHoldsTheDownloadIcon`（图标在状态码/耗时之后）、`TestResponsePictureIsShown`（图片视图出现、尺寸行、下载图标可点）、`TestResponsePlayerPlaysAndPauses`（点播放后 `Playing()` 为真、点暂停为假）、`TestResponseFileSavesToDownloads`（落盘字节一致、第二次编号 `(2)`、取消后目录不变）、`TestResponseVideoOffersSave`；`response_tabs_test.go` 的 `TestResponseTabsShowTheBodyItsHeadersAndTheRequest`（四个页签各自显示预览缩进体/原样体/响应头/请求头）、`TestResponseLanguageFollowsTheContentType`（九种内容类型 → 语法，未知回落纯文本）、`TestResponseTabsAreFixed`（页签名固定，首个为「预览」）、`TestHeaderTabCountsWhatItLists`、`TestSendButtonCancelsTheRequest`（等待中按钮变「取消」、点后 `请求已取消` 且可重试）；截图 `docs/shots/response-{json,image,audio,file,headers,request-headers}`。
+  - **适用范围**：`internal/app/view_response.go`、`internal/app/view_response_tabs.go`、`internal/app/view_response_media.go`、`internal/app/response_body.go`、`internal/app/response_media.go`、`internal/app/app.go`（`tab.view/picture/audio/respTab/sentHeaders/cancel`、`send`/`cancelSend`/`apply`）、`internal/req/http.go`（`Response.Raw`）、`internal/icons`（Play/Pause/Music/Download/Picture/Video）、`internal/app/run.go`（`pickDownloadDir`/`chooseFolder`）。
+- **标题**：查找「集合根」的向上遍历不能一路爬到盘符根，否则第一次写盘会落到 `C:\.tmp`
+  - **触发信号**：写集合的 `apigo.yaml`（一个集合的第一个文件）时，临时文件出现在 `C:\.tmp`；某些机器上直接报 `The process cannot access the file because it is being used by another process`；`C:\` 下莫名多出 `.tmp`。
+  - **根因/约束**：`tmpRoot(dir)` 从目标目录向上找含 `apigo.yaml` 的目录，找不到就继续往上，直到 `filepath.Dir(dir) == dir` 才停——第一次写时整个集合都还没有 `apigo.yaml`，于是走到了卷根。
+  - **正确做法**：记下起点，遇到 `parent == dir || parent == "." || parent == 卷分隔符` 就返回**起点**（把临时文件留在目标所在目录），而不是返回卷根；这样「集合第一个文件」的临时文件落在集合目录的 `.tmp/`。
+  - **验证方式**：`internal/store` 的 `TestFirstWriteStaysInTheCollection`（新建集合后集合目录有 `.tmp`、store 上一层没有）。
+  - **适用范围**：`internal/store/service_yaml.go`（`tmpRoot`/`WriteYAML`）、任何「向上找项目根」的遍历。
+
+- **标题**：响应体上限既要有默认值又要在设置里可改：给 `Execute` 显式传字节数，别在 `req` 里写死常量
+  - **触发信号**：默认 10 MB 的 `maxResponseBytes` 常量把上千 MB 的下载/图片响应截断，用户还要能自己调这个上限。
+  - **根因/约束**：上限原本是 `internal/req` 里的包级常量，设置只能改应用状态；`Execute` 签名不带上限的话，`req` 就只能读全局。
+  - **正确做法**：`req.DefaultMaxResponse`（100 MB）当默认，`req.Execute(ctx, req, limit int64)` 显式收字节数、`limit <= 0` 退回默认；应用侧 `store.Settings.MaxResponseMB`（MB，0 缺省）→ `applySettings` 读成 `a.maxResponseMB float64`（给 `ui.NumberInput` 用）→ `a.responseLimit()` 换算成字节，`send` 时传进去；`rememberSettings` 用 `math.Round` 写回整数 MB；越界（<1 或 >10240）一律夹到默认或上限，别让设置文件写坏一个 0 出来。截断提示用 `limitText`（<1 MB 显示 KB），`Size` 也改成实际留下的字节数。
+  - **验证方式**：`internal/req` 的 `TestExecuteCapsTheBody`（超限截断、错误里写 2 KB）、`TestExecuteDefaultsItsLimit`、`TestLimitTextWritesSizes`；`internal/app` 的 `TestResponseLimitFollowsSettings`（默认/保存值/越界）、`TestResponseLimitIsRemembered`（落盘 32）、`TestSendCutsTheBodyAtTheLimit`（1 MB 上限截断且面板提示）、`TestDefaultLimitMatchesTheRequestPackage`；`TestSettingsModal` 断言「响应体上限（MB）」在。
+  - **适用范围**：`internal/req/http.go`、`internal/store/service_settings.go`、`internal/app/app.go`（`maxResponseMB`/`responseLimit`/`rememberSettings`）、`internal/app/view_env.go`（`responseLimitField`）。
+
+- **标题**：`Window.Update(fn)` 是「把 fn 放到窗口线程上跑」，不是「在后台跑完再回来」——把 `Execute` 塞进 fn 会冻住整个窗口
+  - **触发信号**：一个慢接口（或服务端一直不回）在等的时候，整个界面点不动、别的标签页发不出请求；所有请求要排队一个个来。
+  - **根因/约束**：`a.after = window.Update`；把「发送 + 应用结果」写成 `a.after(run)`，`run` 里的 `req.Execute` 就在主线程执行，30 s 超时期间窗口一帧都画不出来。异步不是「套个 goroutine 就完事」——关键在于**哪一段在哪个线程**：网络与重活在自己的 goroutine，只有落在应用状态上的赋值回窗口线程。
+  - **正确做法**：`send` 里主线程先算好要发送的一切（`responseLimit()` 之类读应用状态的也要在主线程取值），然后 `go func(){ sh := prepareResponse(req.Execute(ctx, built, limit)); a.after(func(){ a.apply(t, sh) }) }()`；`prepareResponse` 把「解码位图 / 打开播放器 / JSON 美化」这些重活也放在 goroutine 里，只把结果（`shown`）带回来；`apply` 只做赋值与 `AddHistory`。同一标签页用 `t.loading` 挡住重复发送，不同标签页各自一条 goroutine；`a.after == nil`（测试）时全部就地跑，结果同步可用。
+  - **验证方式**：`internal/app/send_async_test.go` 的 `TestSendDoesNotBlockOtherRequests`（一个 handler 挂住不返回：另一标签页照常收到 200、第一个仍在 `loading`、界面还能点标签页切换）；`go test -race ./...` 覆盖 `after` 与 tab 状态的跨线程交接。
+  - **适用范围**：`internal/app/app.go`（`send`/`apply`/`showResponse`）、`internal/app/response_media.go`（`shown`/`prepareResponse`）、`internal/app/app_watch.go`（同一模式：`Next` 在监听 goroutine、`reloadActive` 回窗口线程）。
+
+- **标题**：WebSocket 面板：连接与读循环各有归宿，日志只存窗口线程上的数据
+  - **触发信号**：连上后收不到消息；关标签后 goroutine 还在跑；断线后日志里再也没有新行；切换标签时旧连接的消息混进新标签。
+  - **根因/约束**：gorilla 的读是阻塞的，必须有一条 goroutine 专门读；写不能并发（多个 goroutine 同时 `WriteMessage` 会 panic），要串行化；`ui` 的元素与状态只能碰窗口线程；`a.after` 是「把函数放到窗口线程跑」，测试里为 nil 时是就地跑。
+  - **正确做法**：`internal/ws` 只做协议层——`Dial` 成功后起一条读 goroutine，把 `Received`/`Disconnected` 投进 `Events()` 通道，通道随连接结束关闭；`Send` 用互斥锁串行化并设写超时；`Close` 先发关闭帧（1s 超时）再关底层连接，`sync.Once` 保证只关一次。应用侧 `connectSocket` 在 goroutine 里 `Dial`，结果经 `a.after` 落回 `t.conn` 与日志；`readSocket` 把每条事件也经 `a.after` 追加，并在回调里比对 `t.conn != conn` 丢弃已被替换/断开的连接尾巴；标签关闭走 `dropTabMenu` → `closeSocket`，日志上限 500 条；用户断开连接（`disconnectSocket`）直接清空日志，服务端关闭则留一行「已断开」；日志行 `摘要 Grow(1)`（内容在 `appendSocket` 里用 `collapseText` 折叠成一行、上限 `summaryLine=1024` 字符，**不再按 72 字符硬截断**——宽度交给行布局，窗口宽窄决定省略位置）+ 行尾定宽的大小与时间（`logSizeWidth`/`logTimeWidth`，`TextAlign(End)`，时间排在最后）；`过滤日志` 输入框写 `t.logFilter`，`logLines()` 按消息内容不区分大小写包含匹配给出要画的索引，头部计数在筛选时变成 `M / N 条`、无命中给「没有匹配「…」的日志」；消息行点开才建 `editor.State`（`toggleLogLine`，缓冲区内容先过 `prettyResponse`——JSON 消息按两空格缩进排版，和响应预览同一套缩进，否则原样；只读、`FitContent`、字号比编辑器默认小一号），关掉即置 nil，日志被裁剪时随之释放。
+  - **补充（按钮）**：请求行的 `发送`/`保存`/`连接` 都是「图标 + 文字」，用 `iconButtonSpec{label, name, icon, disabled, plain, run}` + 自绘 `ButtonBase`（主按钮 `Background(p.Accent)` + `AccentText` 前景；次要按钮 `plain: true` 不铺底色、**保留 1px 边框**、用 `TextSecondary` 着色、悬浮时 `SurfaceHover`；`small: true` 再降一级（高 28、字号 Tiny、图标 12）；两者都 `MinWidth(测量宽度)`）；**不要用 `PrimaryButton(c, label)` 再挂 `Children`**——按钮自带的文字会和 Children 里的文字一起画，出现「发送 ⇄ 发送」。`name` 要与可见文字不同（`保存接口`/`发送请求`/`确认保存`/`保存环境`），否则 `ui.Tester.Find` 会命中同屏同名的另一个按钮（请求行、文件夹弹窗、环境弹窗都有「保存」）。
+  - **验证方式**：`internal/ws/ws_test.go`（文本/二进制回声、子协议、关闭后事件通道关闭、握手被拒报状态码）；`internal/app/ws_test.go` 的 `TestSocketConnectsAndEchoes`（连接→日志→发送→回声→发送后清空→断开）、`TestSocketLogClears`、`TestSocketMessageFormatFollowsThePick`（格式落盘 + Binary 禁用提示）、`TestSocketSubprotocolReachesTheHandshake`（服务端真的收到 `chat`）、`TestSocketRequestKeepsItsMessage`（子协议/格式/消息写进接口文件再读回）。
+  - **适用范围**：`internal/ws`、`internal/app/{view_websocket,socket}.go`、`internal/app/app.go`（`tab.conn/socketLog/protocol`、`savedFromTab`）、`internal/store/service_store.go`（`Request.Protocol`）、`internal/app/view_request.go`（`iconButton`）；以后接 SSE/Socket.IO 复用同一套「协议层通道 + 窗口线程落地」。
+
+- **标题**：同一种控件出现在多处时抽成一个函数，别各画各的——`selectTrigger`/`selectChoiceRow`
+  - **触发信号**：同一个应用里出现两种「带边框 + 右侧箭头」的下拉（环境下拉窄而土灰、消息格式下拉的箭头贴着文字、选中项一处带勾一处不带），用户会问「这两个为什么不一样」。
+  - **根因/约束**：每个下拉各自 `ButtonBase` + 子元素拼装，写着写着就分叉：内边距 8/10、箭头 11/12、`Grow(1)` 撑开 vs `SpaceBetween`、选中项有无勾、文字 `p.Text`/`p.TextSecondary`。视觉一致性靠「记住上次怎么写的」不可能稳住。
+  - **正确做法**：`internal/app/view_menu.go` 里 `selectSpec{name,label,width}` + `selectTrigger`（`TabStripHeight-12` 高、`Padding(0,10)`、`MinWidth(0)`、`Background(p.Surface)`、1px `p.Border`、`Justify(SpaceBetween)`、悬浮 `SurfaceHover`、label 用 `TextSecondary`、`icons.Chevron` 12 号 `TextMuted`）与 `selectChoice{name,label,chosen,run}` + `selectChoiceRow`（选中项 `icons.Check` 12 号 `Accent` + 文字 `Accent` + `Accent.Alpha(accentTint)` 底色，未选中的用 `ui.Row(c).Width(12)` 占住勾位）。环境下拉与 WS 消息格式下拉都调这两个；`name` 保持旧值（`环境：<名字>`、`消息格式 <格式>`、`切换到 <环境>`），测试不用改。
+  - **验证方式**：`internal/app/env_test.go`、`ws_test.go` 的格式切换用例仍绿；`APIGO_SHOTS=docs/shots go test -run TestShots ./internal/app/` 后肉眼比对 `websocket-format-menu.png` 与顶栏环境下拉。
+  - **补充（垂直居中）**：标签条 `requestTabs` 是 `AlignItems(Start)`（标签的 2px 强调线要贴顶），直接把 28 高的下拉放进去会**贴着上沿**（上 0 / 下 12）。给下拉套一层 `ui.Row(c).Height(design.TabStripHeight).AlignItems(ui.Center)` 再放进去，上下各 6；WS 工具栏那一行本来就是 `AlignItems(ui.Center)`，不用套。同理：任何「矮控件落在高高度的 Start 对齐行里」都要自己套一层居中行或 `AlignSelf(ui.Center)`。
+  - **适用范围**：`internal/app/view_menu.go`、`view_tabs.go`（`environmentPicker`）、`view_websocket.go`（`messageFormatMenu`）；以后任何「从列表里挑一个」的控件。
+
+- **标题**：一行的「剩余宽度」要用 `Grow(1)` 给内容，而不是在末尾塞一个 `Grow(1)` 空格——否则文字会被算短
+  - **触发信号**：首页集合列表里名字只剩「sta…」「测…」，右边却有一大片空白；接口树里也偶发同类现象。
+  - **根因/约束**：`ui.Column` 不写宽度时按内容自适应，而工具包对嵌入字体的文本 max-content 测量比实际绘制小（见上一条）；行尾再放一个 `ui.Row(c).Grow(1)` 当弹簧，弹簧先把剩余宽度吃掉，名字只能拿到被算小的那点宽度 → `SingleLine` 判「放不下」，三两个字就省略。
+  - **正确做法**：把「谁该占剩余宽度」写成那个元素自己的 `Grow(1)`：首页行改成 `ui.Column(c).Grow(1)`（名称 `Grow(1)` 在列里铺满），删掉行尾的弹簧；右侧 `打开`/`…` 保持自然宽度。这样窗口宽就长、窄就在按钮前省略。顺手把名称旁的 `HTTP` 类型标记删了——集合名本身不必再标协议。
+  - **验证方式**：`TestHomeCollectionNameFillsTheRow`（1280 与 640 两个宽度下名称右缘距「打开」都在 20 px 内、宽窗口的名称更宽、文本里没有 `HTTP`）；截图 `docs/shots/home-list.png`。去掉 `Column` 的 `Grow(1)` 时该测试的宽度比较会退化成「三字省略」。
+  - **适用范围**：`internal/app/view_home.go`（`homeCollectionBody`）；任何「图标 + 标题 + 行尾按钮」的列表行。
+
+- **标题**：列表要「跟着磁盘变」就多开一条 watch 盯它自己的目录，别指望能靠帧去 stat
+  - **触发信号**：用户在文件管理器里删掉一个集合目录，首页列表还当它存在；点「打开」后是空的或者报错。
+  - **根因/约束**：`followFiles()` 原来只 watch **当前打开的集合**目录（为了树跟着变），首页在 `active == ""` 时一条 watch 都没有；每帧对每个集合 `os.Stat` 又太贵（10 个集合 × 60 fps = 600 次/秒）。
+  - **正确做法**：多开一条 `followList()`，watch `store.CollectionsDir()`（非递归），事件回到窗口线程后跑 `refreshMissing()`：它对每个集合 `os.Stat` 一次，得到 `map[string]bool` 缓存。顺序上**先起列表 watch 再起集合 watch**，这样 `watchLog.last()` 仍是集合 watch，原有的 watch 测试不用改。`listWatched` 保证只试一次（平台不支持也不每帧重试），新建集合时置回 `false`（这时目录才第一次存在）；换数据目录（`useDataDir`）要停掉旧 watch 再重置。列表行按 `a.collectionMissing(id)` 灰显 + `Strikethrough()`，点击/双击走 `openOrForgetCollection` → `askToForgetMissingCollection`（确认框复用 `a.ask`，动作是 `deleteCollection` = `HideCollection`，只从列表移除，目录本来就没了）。
+  - **验证方式**：`TestWatchMarksDeletedCollections`（首页首选 watch 的路径是 `CollectionsDir()`；`os.RemoveAll` 后 report 一次，`applyWatch` 后 `collectionMissing` 为真且列表仍显示该集合）、`TestHomeMarksMissingCollections`（名称最长连续墨迹 ≥ 半个 advance，即真的有中划线；点「打开」不开集合、弹出「集合不存在」、确认后 `Collections` 清空）。把 `Strikethrough()` 去掉时前者立刻报「longest ink run is 15 px of 75」。
+  - **适用范围**：`internal/app/app_watch.go`（`followFiles`/`followList`/`drainList`/`refreshMissing`）、`internal/app/view_home.go`、`internal/app/view_confirm.go`；以后任何「列表要跟着磁盘状态变」的地方。
+
+- **标题**：多行「标签 + 说明」要做成两列对齐：标签用 `MinWidth(最长标签)`，别给内层 Column 加 `AlignItems(Start)`
+  - **触发信号**：引导页/快捷键表里每行按自身宽度居中，标签左边缘参差、说明/按键起始位置各不相同；想「左对齐」时给 `Column` 加 `AlignItems(ui.Start)`，结果按键方块被压成「…」。
+  - **根因/约束**：`ui.Column(c).Center()` 会把每个子元素按自身宽度水平居中，所以四行各自漂移；而内层 `Column.AlignItems(Start)` 让它的宽度按子元素的最小内容算，比最宽的一行还窄 → 行里的按键在有限宽度里被挤掉（同一类「内在宽度被算小」的坑）。
+  - **正确做法**：内层 Column **不要**加 `AlignItems`（交给默认拉伸，行宽 = 最宽一行，四行共享同一左边缘），标签文字用 `MinWidth(hintLabelWidth)`（`max(measureText(各标签)) + tabWiggle`）撑出统一的标签列，按键/说明自然从同一条左边缘开始；行距继续用 `Gap`。方块（`keycap`）自己也要 `MinWidth(2*7 + measureText + tabWiggle)`，否则刚好够宽时文字又被省略号吃掉。
+  - **验证方式**：`TestStartHintLinesUpItsActions`（四行标签 X 相同、行距 ≥ 20、第一行与第二行的说明以及第三行的按键 X 都相同——把标签的 `MinWidth` 去掉时立刻报「tips and keys start at 777.0 and 751.0」）。
+  - **适用范围**：`internal/app/view_start.go`（`startHint`/`hintList`/`hintRow`/`keycap`）；任何「标签 + 值/按键」的两列表格式排版。
+
+- **标题**：联网检查新版本要「默认关、可注入、结果如实说」——别用 mygo 自带 Updater（需要签名 feed）
+  - **触发信号**：想做自动更新，发现 `mygo.Updater` 只在 `mygo.config.ts` 配了签名 feed 的构建里可用（`ErrUpdatesDisabled`），而本项目的 Release 只是 GitHub 上的普通产物。
+  - **根因/约束**：签名 update feed 需要额外密钥与 `mygo build` 配置；`Updater.Check` 在开发构建/未配置构建里直接报错。要「够用的自动更新」只需要查 GitHub 最新 Release 并让用户去下载页。
+  - **正确做法**：`internal/app/update.go` 用 GitHub API（`/releases/latest`，带 `User-Agent`，15s 超时）读 `tag_name/html_url/body`，跳过 `draft`/`prerelease`；版本比较自己写 `newerVersion`（按点分数字逐段比，支持前缀 `v`，非数字后缀截断，空版本当 `0.0.0`，读不出来的版本永不算新）。`update_check.go` 里 `checkUpdates(ask)`：`a.checkRelease` 可注入（测试用假函数），`a.after == nil`（测试）时同步跑，否则 goroutine 里查、`a.after` 回窗口线程写 `a.updateNote`；发现新版本用 `a.ask(confirm{... c.OpenURL(url)})` 问一句再开浏览器。**`autoUpdate` 默认 false**（`settings.AutoUpdate` + 设置「通用 → 更新」复选框），只在 `run.go` 的 `checkUpdatesAtStart` 里按开关决定要不要联网。
+  - **验证方式**：`TestNewerVersion`（0.2.0>0.1.0、1.10.0>1.9.9、`nightly` 不算新）、`TestReleaseAtReadsGitHub`（httptest 验 User-Agent、草稿/预发布/无 tag 视为无更新、403 报错）、`TestAutoUpdateIsOffUntilTurnedOn`（默认关→勾选落盘→点「检查更新」出现「有新版本 0.2.0」与确认框→最新/失败两种结果的措辞）、`TestStartupCheckRunsOnlyWhenEnabled`（开关关时一次网络都不发）。
+  - **适用范围**：`internal/app/update.go`、`update_check.go`、`internal/store/service_settings.go`、`internal/app/view_env.go`（`autoUpdateField`）、`internal/app/run.go`。
+
+- **标题**：显示名与磁盘名分开：界面叫 `ApiGo`，落盘仍是 `apigo`
+  - **触发信号**：用户要把项目名从 apigo 改成 ApiGo，但一改 `mygo.json` 的 `name` 就会连带换掉可执行文件名**和**数据目录（`App.Name()` 决定 `%APPDATA%/<name>`），已有集合会像凭空消失。
+  - **根因/约束**：`mygo.App.Path(PathUserData)` = `os.UserConfigDir()/App.Name()`；`App.Name()` 来自 `mygo.json` 的 `name`。`apigo.yaml` 是集合目录里的元文件名，改了旧目录读不出来；Go 模块路径 `apigo` 与 GitHub 仓库名也绑在一起。这些是「磁盘/构建标识」，不是显示名。
+  - **正确做法**：显示名集中到 `internal/app/view_footer.go` 的 `const appName = "ApiGo"`，窗口标题（`run.go` 的 `Title: appName`）与状态栏/设置里的版本行都用它；**不动** `mygo.json` 的 `name`/`identifier`、数据目录、`store.MetaFile = "apigo.yaml"`、模块路径与仓库名。文案（README/设计文档）里作为产品名的「apigo」改成 ApiGo，作为文件名/路径/包名的保持原样。
+  - **验证方式**：`TestVersionLineNamesTheApp`（`appVersion()` 以 `ApiGo` 开头、状态栏文本里有 `ApiGo`）；`task check` + 截图里状态栏右下角显示 `ApiGo`。
+  - **适用范围**：`internal/app/view_footer.go`（`appName`/`appVersion`）、`internal/app/run.go`、README/设计文档文案；以后任何「改产品名但不想动磁盘格式」的需求。
+
+- **标题**：`ui.Modal` 里的面板高度要自己算：给「滚动区」显式 `Height`，不是给面板 `Height`
+  - **触发信号**：设置弹窗在矮窗口里把底部（版本/数据）顶出窗口，圆角都被切掉；给面板加 `.Height(...)` 或 `.MaxHeight(...)` 都没用。
+  - **根因/约束**：`ui.Modal` 自身会在窗口内留约 40 DIP 的内边距，但**不会裁剪**超出的面板；面板的高度仍是内容撑出来的，里面 `ui.Scroll` 用 `Grow(1)` 时按内容高度参与计算，于是「限高」完全失效（`Height`/`MaxHeight` 都被内容顶破）。此外 `tt.Find` 返回的是布局位置而非可见性，滚动区里的内容即使被裁剪也照样能 Find 到，别拿它判断「是否显示」。
+  - **正确做法**：先算窗口能给的高度 `tall := min(settingsPanelHeight, height - 2*settingsModalInset)`，再把**滚动区**写成 `ui.Scroll(c).Height(tall - 2*settingsPadding - settingsTitleHeight - settingsGap)`（显式高度），面板本身不加 `Height`；面板高度自然等于「内边距 + 标题 + 间距 + 滚动区」。滚动区不要套 `noScrollbars`，滚动条是「下面还有内容」的提示。横排的标题、分栏等用常量把这个式子写清楚（`settingsPanelHeight/settingsPadding/settingsGap/settingsTitleHeight/settingsModalInset`）。
+  - **验证方式**：`TestSettingsFitAShortWindow`（1280×560 下窗口底部的像素是遮罩色而不是面板白，`tt.Scroll` 之后「版本」上移）；截图 `docs/shots/settings-modal.png`。改回「给面板 `Height`」时底部像素立刻变白（255）。
+  - **适用范围**：`internal/app/view_env.go`（`settingsModal`）；任何放进 `ui.Modal` 且内容可能超过窗口的面板。
+
+- **标题**：折叠开关放在状态栏最左、用无边框图标，两态各一个图标；浮层按钮（`Overlay`+`AttachTo`）是可行的备选
+  - **触发信号**：接口树的折叠按钮一开始做成请求页左下角的浮层按钮（带边框的方块），被要求挪到「底部左下角」、去掉边框、并且收起/展开用不同图标。
+  - **根因/约束**：`ui.Row`/`ui.Column` 只是顺序排布，没有叠加层；浮层要用 `ui.Overlay(c, fn)` 把元素画在整窗之上，再用 `Element.AttachTo(target, at, self)`（`ui.AnchorBottomLeft` 等）贴到某块区域的角上，之后 `Left/Top/Right/Bottom` 偏移，且 target 必须同帧先构建。状态栏则本来就在窗口最底部，把按钮放进 `footer` 的第一位就是「底部左下角」，不需要浮层，也不会盖住响应内容。
+  - **正确做法**：折叠按钮放进 `internal/app/view_footer.go` 的 `footer()` 最左侧（`a.active != ""` 时才画），`ui.ButtonBase` 20×20、无 `Background`/`Border`，只挂 `ui.Icon`（13 号 `TextMuted`），悬浮才铺 `SurfaceHover`；两态用两个图标：展开时 `icons.SidebarClose`（面板 + 箭头朝左，点了收起），收起时 `icons.SidebarOpen`（箭头朝右）；无障碍名保持「收起接口面板」/「展开接口面板」。收起时 `collectionWorkspace` 里整块 `requestsPanel` 连分隔线一起不画。
+  - **验证方式**：`TestSidebarFoldsAway`（点「收起接口面板」后树消失、请求页还在、按钮变「展开接口面板」，再点树回来）；截图 `docs/shots/request-filled.png` 与 `docs/shots/sidebar-collapsed.png` 的状态栏最左侧两个不同图标。
+  - **适用范围**：`internal/app/view_footer.go`（`footer`/`sidebarToggle`）、`internal/app/view.go`（`collectionWorkspace`）、`internal/icons`（`SidebarClose`/`SidebarOpen`）；以后「放在窗口边缘的开关」优先进状态栏或标签条，真的需要浮在内容上时再用 `Overlay` + `AttachTo`。
 
 ## 编码与重构规范
 
