@@ -20,6 +20,10 @@ type release struct {
 // releaseRepo is the repository the app's releases are published in.
 const releaseRepo = "younland/apigo"
 
+// projectURL is the page the settings link to: where the project is kept, its
+// releases beside it.
+const projectURL = "https://github.com/" + releaseRepo
+
 // releaseURL is where GitHub lists the newest release of the app.
 const releaseURL = "https://api.github.com/repos/" + releaseRepo + "/releases/latest"
 

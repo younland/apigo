@@ -38,8 +38,7 @@ func (a *app) socketPane(c *ui.Context, p design.Palette, t *tab) {
 // icon beside each label.
 func (a *app) socketLine(c *ui.Context, p design.Palette, t *tab) {
 	ui.Row(c).FillWidth().Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
-		ui.TextInput(c, &t.url).Grow(1).Height(design.RequestRowHeight).
-			Placeholder("ws://localhost:8080/socket").Font("monospace")
+		a.addressField(c, p, t, "ws://localhost:8080/socket")
 		switch {
 		case t.connecting:
 			ui.Text(c, "连接中…").FontSize(design.FontSizeBody).TextColor(p.TextMuted)

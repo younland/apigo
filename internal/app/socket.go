@@ -132,6 +132,11 @@ func (a *app) connectSocket(c *ui.Context, t *tab) {
 		c.Toast("先填 WebSocket 地址")
 		return
 	}
+	address, missing := a.targetURL(t)
+	if len(missing) > 0 {
+		c.Toast(missingText(missing))
+		return
+	}
 	headers, protocols := t.socketHandshake()
 	t.connecting = true
 	t.appendSocket(wsEvent{kind: socketNote, at: time.Now(), text: "正在连接到 " + address})

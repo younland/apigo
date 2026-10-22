@@ -46,6 +46,7 @@ func (s *Store) loadGlobalEnvironments() error {
 		if envs[i].ID == "" {
 			envs[i].ID = environmentID(scopeGlobal, envs[i].Name)
 		}
+		migrateBaseURL(&envs[i])
 	}
 	s.Environments = append(s.Environments, envs...)
 	return nil
@@ -71,6 +72,7 @@ func (s *Store) readEnvironments(scope string) ([]Environment, error) {
 			return nil, err
 		}
 		env.Scope = scope
+		migrateBaseURL(&env)
 		if env.Name == "" {
 			env.Name = interfaceName(entry.Name())
 		}
@@ -85,6 +87,17 @@ func (s *Store) readEnvironments(scope string) ([]Environment, error) {
 // environmentID names an environment the files do not name.
 func environmentID(scope, name string) string {
 	return scope + "/" + name
+}
+
+// migrateBaseURL reads the baseurl variable of an environment kept by an older
+// build, which wrote it in capitals: its value is the reader's, so the request
+// line keeps showing it under the name the app uses now.
+func migrateBaseURL(env *Environment) {
+	for i := range env.Vars {
+		if env.Vars[i].Key == legacyBaseURLVariable {
+			env.Vars[i].Key = BaseURLVariable
+		}
+	}
 }
 
 // saveEnvironments writes every environment where its scope keeps it, and
@@ -200,27 +213,36 @@ func (s *Store) EnvironmentsFor(collectionID string) []Environment {
 	return out
 }
 
+// BaseURLVariable is the variable a request that starts with a slash is read
+// against: its value is the address the rest of the path follows, and the
+// request line shows it before the field.
+const BaseURLVariable = "baseurl"
+
+// legacyBaseURLVariable is how the variable was written before it took its
+// lowercase name: a collection kept by an older build reads as the current one.
+const legacyBaseURLVariable = "BaseURL"
+
 // defaultEnvironmentNames are the environments a new collection starts
 // with, the first of them active.
 var defaultEnvironmentNames = []string{"本地", "测试", "生产"}
 
 // addDefaultEnvironments gives a new collection its environments, each
-// carrying an empty BaseURL variable for the request line's leading URL.
+// carrying an empty baseurl variable for the request line's leading URL.
 func (s *Store) addDefaultEnvironments(collectionID string) error {
 	for i, name := range defaultEnvironmentNames {
 		s.Environments = append(s.Environments, Environment{
 			ID: s.newEnvironmentID(), Name: name, Scope: collectionID, Active: i == 0,
-			Vars: []Row{{Enabled: true, Key: "BaseURL"}},
+			Vars: []Row{{Enabled: true, Key: BaseURLVariable}},
 		})
 	}
 	return s.SaveEnvironments()
 }
 
-// addEnvironment adds an environment with an empty BaseURL to a collection.
+// addEnvironment adds an environment with an empty baseurl to a collection.
 func (s *Store) addEnvironment(collectionID, name string) (Environment, error) {
 	env := Environment{
 		ID: s.newEnvironmentID(), Name: s.uniqueEnvironmentName(collectionID, name),
-		Scope: collectionID, Vars: []Row{{Enabled: true, Key: "BaseURL"}},
+		Scope: collectionID, Vars: []Row{{Enabled: true, Key: BaseURLVariable}},
 	}
 	s.Environments = append(s.Environments, env)
 	return env, s.SaveEnvironments()
@@ -338,12 +360,12 @@ func (s *Store) NameEnvironment(id, name string) string {
 	return env.Name
 }
 
-// newEnvironment makes an environment with an empty BaseURL without writing
+// newEnvironment makes an environment with an empty baseurl without writing
 // it, as the manager adds one until it is saved.
 func (s *Store) NewEnvironment(collectionID, name string) Environment {
 	env := Environment{
 		ID: s.newEnvironmentID(), Name: s.uniqueEnvironmentName(collectionID, name),
-		Scope: collectionID, Vars: []Row{{Enabled: true, Key: "BaseURL"}},
+		Scope: collectionID, Vars: []Row{{Enabled: true, Key: BaseURLVariable}},
 	}
 	s.Environments = append(s.Environments, env)
 	return env

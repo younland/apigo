@@ -57,7 +57,7 @@ func (a *app) homeHeader(c *ui.Context, p design.Palette) {
 			return
 		}
 		if ui.Button(c, "导入集合").Cursor(ui.CursorPointer).Clicked() {
-			c.Toast("导入集合尚未实现：后续支持 Postman、在线 Swagger、OpenAPI v2/v3")
+			a.openImportDialog()
 		}
 		if ui.PrimaryButton(c, "新建集合").Cursor(ui.CursorPointer).Clicked() {
 			a.openCollectionModal()
@@ -80,11 +80,11 @@ func (a *app) homeEmpty(c *ui.Context, p design.Palette) {
 			if ui.PrimaryButton(c, "新建集合").Cursor(ui.CursorPointer).Clicked() {
 				a.openCollectionModal()
 			}
-			if ui.Button(c, "从集合文件导入").Cursor(ui.CursorPointer).Clicked() {
-				c.Toast("导入集合尚未实现：后续支持 Postman、在线 Swagger、OpenAPI v2/v3")
+			if ui.Button(c, "导入文档").Cursor(ui.CursorPointer).Clicked() {
+				a.openImportDialog()
 			}
 		})
-		ui.Text(c, "新建的集合会自带「本地 / 测试 / 生产」三个环境和 BaseURL 变量").
+		ui.Text(c, "新建的集合会自带「本地 / 测试 / 生产」三个环境和 baseurl 变量").
 			FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
 	})
 }

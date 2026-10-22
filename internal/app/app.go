@@ -244,6 +244,9 @@ type app struct {
 	envID            string
 	envName          string
 	envVars          widgets.State
+	// envBaseURL is the prefix URL of the environment being edited, which the
+	// manager shows on its own rather than as one of the rows.
+	envBaseURL string
 	// envEdits is how the environments stood when the manager opened: what a
 	// cancel puts back.
 	envEdits     []environment
@@ -257,6 +260,7 @@ type app struct {
 	collectionOpen bool   // the new-collection dialog
 	collectionEdit string // the collection the dialog renames, "" for a new one
 	collectionName string
+	importDialog   importState      // the 导入项目 dialog
 	question       confirm          // the question a dialog asks before an action
 	where          folderQuestion   // the folder a dialog asks for
 	foldersClosed  map[string]bool  // folders the tree shows collapsed
@@ -308,6 +312,14 @@ type app struct {
 	// chooseFile asks the desktop for a file to upload. main fills it with the
 	// file dialog; tests replace it.
 	chooseFile func() (string, error)
+
+	// fetchDoc reads the document an import names by URL. main leaves it nil
+	// for the package's own read; tests replace it.
+	fetchDoc func(ctx context.Context, url string) ([]byte, error)
+
+	// chooseDoc asks the desktop for an OpenAPI/Swagger document. main fills it
+	// with the file dialog; tests replace it.
+	chooseDoc func() (string, error)
 
 	// pickDownloadDir asks the desktop where a response body goes when the
 	// reader downloads it: the downloads directory is where the dialog opens,
@@ -992,24 +1004,27 @@ func (a *app) openEnvManager() {
 	a.editEnvironment(id)
 }
 
-// editEnvironment loads an environment's variables for editing.
+// editEnvironment loads an environment's variables for editing: its prefix URL
+// on its own, and the rows beside it.
 func (a *app) editEnvironment(id string) {
 	a.envID = id
 	env := a.store.Environment(id)
 	if env == nil {
-		a.envName, a.envVars = "", widgets.State{}
+		a.envName, a.envVars, a.envBaseURL = "", widgets.State{}, ""
 		return
 	}
 	a.envName = env.Name
-	a.envVars = widgets.State{Rows: rowsFromSaved(env.Vars), Compact: true}
+	prefix, rows := baseURLOf(env.Vars)
+	a.envBaseURL = prefix
+	a.envVars = widgets.State{Rows: rowsFromSaved(rows), Compact: true}
 }
 
 // saveEnvEdits keeps what the environment manager changed: the variables of
-// the environment being edited, its name, and which one is active, all of it
-// written in one go. It is the save button's work.
+// the environment being edited, its prefix URL, its name, and which one is
+// active, all of it written in one go. It is the save button's work.
 func (a *app) saveEnvEdits(c *ui.Context) {
 	if env := a.store.Environment(a.envID); env != nil {
-		env.Vars = rowsToSaved(a.envVars.Rows)
+		env.Vars = withBaseURL(a.envBaseURL, rowsToSaved(a.envVars.Rows))
 	}
 	if err := a.store.SaveEnvironments(); err != nil {
 		c.Toast("保存环境失败：" + err.Error())
@@ -1141,7 +1156,7 @@ func (a *app) send(c *ui.Context) {
 		}
 	}
 	vars := a.store.VarsFor(a.active)
-	url, missing := req.ResolveVars(t.url, vars)
+	url, missing := a.targetURL(t)
 	params, missingParams := req.ResolveRows(t.params.Enabled(), vars)
 	headers, missingHeaders := req.ResolveRows(t.headers.Enabled(), vars)
 	form, missingForm := req.ResolveRows(t.form.Enabled(), vars)
@@ -1149,7 +1164,7 @@ func (a *app) send(c *ui.Context) {
 	missing = req.Dedupe(append(append(append(append(missing, missingParams...),
 		missingHeaders...), missingForm...), missingBody...))
 	if len(missing) > 0 {
-		c.Toast("未解析的环境变量：" + strings.Join(missing, "、"))
+		c.Toast(missingText(missing))
 		return
 	}
 	built, err := req.BuildRequest(req.Spec{

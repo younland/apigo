@@ -32,8 +32,7 @@ func (a *app) request(c *ui.Context, p design.Palette) {
 func (a *app) requestLine(c *ui.Context, p design.Palette, t *tab) {
 	ui.Row(c).FillWidth().Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
 		a.methodBox(c, p, t)
-		ui.TextInput(c, &t.url).Grow(1).Height(design.RequestRowHeight).
-			Placeholder("输入请求 URL").Font("monospace")
+		a.addressField(c, p, t, "输入请求 URL")
 		if t.loading {
 			// The request is waiting: the same button stops it.
 			a.iconButton(c, p, iconButtonSpec{label: "取消", name: "取消请求", icon: icons.Close,
@@ -45,6 +44,35 @@ func (a *app) requestLine(c *ui.Context, p design.Palette, t *tab) {
 			run: func() { a.send(c) }})
 		a.saveButton(c, p)
 	})
+}
+
+// addressPrefixGap is the room between the prefix URL and the address inside
+// the field: enough that the two read as one address, not as one run-on word.
+const addressPrefixGap float32 = 4
+
+// addressField is where a request goes: the prefix URL of the environment in
+// use stands inside the field, before the address, while the address is a path
+// under it. The field reads as one input: the prefix is part of it, not a
+// control of its own.
+func (a *app) addressField(c *ui.Context, p design.Palette, t *tab, placeholder string) {
+	base, under := a.baseURLPrefix(t)
+	field := ui.Row(c).Grow(1).Height(design.RequestRowHeight).AlignItems(ui.Center).
+		Padding(0, 10).Radius(design.Radius).Background(p.Surface).
+		Border(design.BorderWidth, p.Border)
+	var input ui.Element
+	field.Children(func() {
+		if under {
+			ui.Text(c, base).FontSize(design.FontSizeBody).Font("monospace").
+				TextColor(p.TextMuted).SingleLine()
+			ui.Row(c).Width(addressPrefixGap)
+		}
+		input = ui.TextInputBase(c, &t.url).Grow(1).Font("monospace").Placeholder(placeholder)
+	})
+	// The whole field takes the focus ring, as its inner input cannot draw one
+	// that covers the prefix beside it.
+	if input.Focused() {
+		field.Border(design.BorderWidth, p.Accent)
+	}
 }
 
 // saveButton keeps the request in its interface file, asking where it goes when

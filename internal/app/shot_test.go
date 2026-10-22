@@ -54,14 +54,14 @@ func demoApp() *app {
 	}
 	a.store.Environments = []environment{
 		{ID: "env-1", Name: "本地", Scope: "collection-1", Active: true, Vars: []savedRow{
-			{Enabled: true, Key: "BaseURL", Value: "http://localhost:8080"},
+			{Enabled: true, Key: store.BaseURLVariable, Value: "http://localhost:8080"},
 			{Enabled: true, Key: "token", Value: "dev-token"},
 		}},
 		{ID: "env-2", Name: "测试", Scope: "collection-1", Vars: []savedRow{
-			{Enabled: true, Key: "BaseURL", Value: "https://test.example.com"},
+			{Enabled: true, Key: store.BaseURLVariable, Value: "https://test.example.com"},
 		}},
 		{ID: "env-3", Name: "生产", Scope: "collection-1", Vars: []savedRow{
-			{Enabled: true, Key: "BaseURL", Value: "https://api.example.com"},
+			{Enabled: true, Key: store.BaseURLVariable, Value: "https://api.example.com"},
 		}},
 	}
 	a.openCollection("collection-1")
@@ -140,6 +140,21 @@ func TestShots(t *testing.T) {
 			a.store = demoApp().store
 			a.openRenameModal("collection-1")
 		}},
+		{"import-dialog", design.Light, func(a *app) {
+			a.store = demoApp().store
+			a.openImportDialog()
+		}},
+		{"import-url", design.Light, func(a *app) {
+			a.store = demoApp().store
+			a.openImportDialog()
+			a.importDialog.source = importFromURL
+			a.importDialog.url = "https://petstore3.swagger.io/api/v3/openapi.json"
+		}},
+		{"import-parsed", design.Light, func(a *app) {
+			a.store = demoApp().store
+			a.openImportDialog()
+			a.parseImportDoc([]byte(importDoc), "petstore.json")
+		}},
 		{"tab-menu", design.Light, func(a *app) {
 			*a = *demoApp()
 			open := a.menuFlag("tab/collection-1")
@@ -211,6 +226,12 @@ func TestShots(t *testing.T) {
 			t.headers.Rows = []widgets.Row{{Enabled: true, Key: "Accept", Value: "application/json"}}
 			a.addTab(a.space())
 			a.current().method = "POST"
+		}},
+		{"request-baseurl", design.Light, func(a *app) {
+			// The address is a path under the baseurl of the environment: the
+			// value stands before the field, read-only.
+			*a = *demoApp()
+			a.current().url = "/v1/pets"
 		}},
 		{"response-json", design.Dark, func(a *app) {
 			*a = *demoApp()

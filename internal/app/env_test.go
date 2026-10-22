@@ -3,6 +3,8 @@ package app
 import (
 	"testing"
 
+	"apigo/internal/store"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -119,16 +121,21 @@ func TestEnvironmentManagerHasTwoColumns(t *testing.T) {
 func TestEnvironmentVariableRowDeletesItself(t *testing.T) {
 	a := envApp(t)
 	tt := ui.NewTester(a.view, 1280, 640)
-	if len(a.envVars.Rows) != 3 {
-		t.Fatalf("rows %d, want the two variables and the empty one", len(a.envVars.Rows))
+	// The prefix URL stands on its own: the rows hold the other variable and the
+	// empty one.
+	if len(a.envVars.Rows) != 2 {
+		t.Fatalf("rows %d, want the variable beside the prefix URL and the empty one", len(a.envVars.Rows))
+	}
+	if a.envBaseURL != "http://localhost:8080" {
+		t.Errorf("prefix url %q, want the one the environment holds", a.envBaseURL)
 	}
 
 	if err := tt.Click("删除变量第 1 行"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if len(a.envVars.Rows) != 2 {
-		t.Errorf("rows %d after the deletion, want the one left and the empty one", len(a.envVars.Rows))
+	if len(a.envVars.Rows) != 1 {
+		t.Errorf("rows %d after the deletion, want the empty one alone", len(a.envVars.Rows))
 	}
 	// The environment itself is untouched until the manager is saved.
 	env := a.store.Environment(a.envID)
@@ -146,10 +153,41 @@ func TestEnvironmentVariableRowDeletesItself(t *testing.T) {
 	if env == nil {
 		t.Fatal("no environment after saving")
 	}
-	for _, v := range env.Vars {
-		if v.Key == "BaseURL" {
-			t.Errorf("variables %+v, want BaseURL deleted by the save", env.Vars)
-		}
+	// The prefix URL is one of the variables, and no row deletes it.
+	if len(env.Vars) != 1 || env.Vars[0].Key != store.BaseURLVariable ||
+		env.Vars[0].Value != "http://localhost:8080" {
+		t.Errorf("variables %+v, want the prefix URL alone after the save", env.Vars)
+	}
+}
+
+// TestEnvironmentPrefixURLEditsAndKeeps checks the prefix URL is edited on its
+// own and written as the variable a path hangs from.
+func TestEnvironmentPrefixURLEditsAndKeeps(t *testing.T) {
+	a := envApp(t)
+	tt := ui.NewTester(a.view, 1280, 640)
+
+	if err := tt.Click("前置URL"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("https://api.example.com")
+	if err := tt.Click("保存环境"); err != nil {
+		t.Fatal(err)
+	}
+	env := a.store.Environment(a.envID)
+	if env == nil {
+		t.Fatal("no environment after saving")
+	}
+	if len(env.Vars) == 0 || env.Vars[0].Key != store.BaseURLVariable {
+		t.Fatalf("variables %+v, want the prefix URL first", env.Vars)
+	}
+	if got := env.Vars[0].Value; got != "https://api.example.com" {
+		t.Errorf("prefix url %q, want what was typed over it", got)
+	}
+	// The environment reads the address through its variables, as a request
+	// that starts with a slash does.
+	if got := a.store.VarsFor(a.active)[store.BaseURLVariable]; got != "https://api.example.com" {
+		t.Errorf("vars %q, want the prefix URL as baseurl", got)
 	}
 }
 

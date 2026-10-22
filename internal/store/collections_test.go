@@ -72,7 +72,7 @@ func TestLoadReadsTreeFromDisk(t *testing.T) {
 	base := filepath.Join(dir, "collections", "demo")
 	files := map[string]string{
 		"apigo.yaml":     "name: Demo\ndescription: 示例集合\n",
-		".env/本地.yaml":   "id: env-1\nname: 本地\nactive: true\nvariables:\n  - enabled: true\n    key: BaseURL\n",
+		".env/本地.yaml":   "id: env-1\nname: 本地\nactive: true\nvariables:\n  - enabled: true\n    key: BaseURL\n    value: http://localhost:8080\n",
 		"顶层.yaml":        "kind: rest\nmethod: GET\nurl: https://api.example.com/top\n",
 		"设备/列表.yaml":     "kind: rest\nmethod: GET\n",
 		"设备/传感器/温度.yaml": "kind: rest\nmethod: POST\n",
@@ -119,6 +119,11 @@ func TestLoadReadsTreeFromDisk(t *testing.T) {
 	if envs := s.EnvironmentsFor("demo"); len(envs) != 1 || envs[0].Name != "本地" {
 		t.Errorf("environments %+v, want the one in .env", envs)
 	}
+	// A collection kept by a build that wrote the variable in capitals reads
+	// under the name the app uses now, with the value it was given.
+	if got := s.VarsFor("demo")[BaseURLVariable]; got != "http://localhost:8080" {
+		t.Errorf("vars %+v, want the legacy variable read as %s", s.VarsFor("demo"), BaseURLVariable)
+	}
 }
 
 func TestStoreRoundTrip(t *testing.T) {
@@ -142,7 +147,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if env == nil {
 		t.Fatal("a new collection has no active environment")
 	}
-	env.Vars = []Row{{Enabled: true, Key: "BaseURL", Value: "http://localhost:8080"}}
+	env.Vars = []Row{{Enabled: true, Key: BaseURLVariable, Value: "http://localhost:8080"}}
 	if err := s.SaveEnvironments(); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +284,7 @@ func TestNewCollectionHasDefaultEnvironments(t *testing.T) {
 		t.Errorf("names %v, want 本地 / 测试 / 生产", names)
 	}
 	for _, env := range envs {
-		if len(env.Vars) != 1 || env.Vars[0].Key != "BaseURL" {
+		if len(env.Vars) != 1 || env.Vars[0].Key != BaseURLVariable {
 			t.Errorf("environment %+v, want an initialized BaseURL", env)
 		}
 	}

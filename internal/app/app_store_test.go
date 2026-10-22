@@ -23,7 +23,7 @@ func testApp(t *testing.T) *app {
 	}}
 	a.store.Environments = []environment{{
 		ID: "env-1", Name: "本地", Scope: "Demo", Active: true,
-		Vars: []savedRow{{Enabled: true, Key: "BaseURL", Value: "https://api.example.com"}},
+		Vars: []savedRow{{Enabled: true, Key: store.BaseURLVariable, Value: "https://api.example.com"}},
 	}}
 	a.openCollection("Demo")
 	// The window opens on the interface the collection holds, as a click on its

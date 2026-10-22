@@ -138,7 +138,8 @@ func (a *app) envEditor(c *ui.Context, p design.Palette) {
 			a.envName = a.store.NameEnvironment(a.envID, a.envName)
 		}
 		ui.Text(c, "变量可在 URL、参数、请求头与请求体里以 {{name}} 使用").
-			FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+			FontSize(design.FontSizeTiny).TextColor(p.TextMuted).Wrap()
+		a.prefixURLField(c, p)
 		ui.Text(c, "环境变量").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
 		a.envVars.Flush()
 		// The variables scroll inside the editor: the window stays the height
@@ -281,6 +282,10 @@ func (a *app) settingsSections(c *ui.Context, p design.Palette) {
 			ui.Row(c).Height(design.RowGap)
 			a.settingsLabel(c, p, "更新")
 			a.autoUpdateField(c, p)
+			ui.Row(c).FillWidth().Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
+				a.settingsLabel(c, p, "项目地址")
+				a.projectLink(c, p)
+			})
 		})
 		a.divider(c, p)
 		a.settingsSection(c, p, "主题", "自定义您的应用程序主题。", func() {
@@ -314,6 +319,19 @@ func (a *app) settingsSections(c *ui.Context, p design.Palette) {
 				TextColor(p.TextSecondary)
 		})
 	})
+}
+
+// projectLink is where the project is kept: the address reads as a link, and a
+// click opens it in the desktop's browser.
+func (a *app) projectLink(c *ui.Context, p design.Palette) {
+	link := ui.ButtonBase(c).Height(24).Padding(0, 0).Label("打开项目地址").Justify(ui.Start).
+		Cursor(ui.CursorPointer).Children(func() {
+		ui.Text(c, projectURL).FontSize(design.FontSizeBody).
+			TextColor(p.Accent).Underline().SingleLine()
+	})
+	if link.Clicked() {
+		c.OpenURL(projectURL)
+	}
 }
 
 // settingsSection draws a settings section: what it changes on the left, its

@@ -455,8 +455,8 @@ func TestSendResolvesEnvironmentVariables(t *testing.T) {
 	defer server.Close()
 
 	a := testApp(t)
-	a.store.Environments[0].Vars = []savedRow{{Enabled: true, Key: "BaseURL", Value: server.URL}}
-	a.current().url = "{{BaseURL}}/pets"
+	a.store.Environments[0].Vars = []savedRow{{Enabled: true, Key: store.BaseURLVariable, Value: server.URL}}
+	a.current().url = "{{baseurl}}/pets"
 	tt := ui.NewTester(a.view, 1280, 800)
 
 	if err := tt.Click("发送"); err != nil {
@@ -974,7 +974,7 @@ func TestHomeEmptyGuidesWithOwnActions(t *testing.T) {
 	a.store = store.New(t.TempDir())
 	tt := ui.NewTester(a.view, 1280, 800)
 
-	for _, want := range []string{"还没有集合", "新建集合", "从集合文件导入", "BaseURL"} {
+	for _, want := range []string{"还没有集合", "新建集合", "导入文档", "baseurl"} {
 		if !tt.HasText(want) {
 			t.Errorf("texts %q, want %q in the empty home window", tt.Texts(), want)
 		}
@@ -1298,5 +1298,27 @@ func TestSettingsFitAShortWindow(t *testing.T) {
 	if after.Y >= before.Y {
 		t.Errorf("the version line stayed at %.1f after scrolling from %.1f, want it up",
 			after.Y, before.Y)
+	}
+}
+
+// TestSettingsOpenTheProjectPage checks the settings name where the project is
+// kept, and that a click opens the page in the desktop's browser.
+func TestSettingsOpenTheProjectPage(t *testing.T) {
+	a := testApp(t)
+	a.settingsOpen = true
+	tt := ui.NewTester(a.view, 1280, 800)
+
+	if !tt.HasText(projectURL) {
+		t.Fatalf("texts %q, want the address of the project", tt.Texts())
+	}
+	// The sections scroll: the address of the project sits under 通用, in view
+	// without scrolling.
+	if err := tt.Click(projectURL); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	opened := tt.OpenedURLs()
+	if len(opened) == 0 || opened[len(opened)-1] != projectURL {
+		t.Errorf("opened %q, want the project page", opened)
 	}
 }

@@ -35,6 +35,7 @@ func (a *app) view(c *ui.Context) {
 	// Dialogs are overlays of the window, not children of the layout, so
 	// their backdrop covers the whole window.
 	a.collectionModal(c, p)
+	a.importModal(c, p)
 	a.envModal(c, p)
 	a.settingsModal(c, p)
 	a.confirmModal(c, p)

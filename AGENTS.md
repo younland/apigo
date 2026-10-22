@@ -326,7 +326,7 @@
   - **触发信号**：列表尾部有「+ 添加行」按钮占一行（图 3）；环境变量想改成一行一个、只要变量名 + 值 + 删除，却不想带复选框和「添加行」。
   - **根因/约束**：`widgets.State.View` 是「复选框 + key + value + 删除 + 添加行」的固定组合，任何差异都要么改它、要么另画；`State` 的增删是延迟的（`remove`/`add` 在下一帧 `Flush` 里生效），自己画行时仍要复用它，否则边遍历边删会越界。
   - **正确做法**：`internal/widgets/kvlist.go` 的 `View` 去掉「添加行」按钮（末尾那个空行本身就能开始新行，`Flush` 会补上）；需要不同列的环境变量用 `internal/app/view_env.go` 自己的 `envVarRow` 画（`State.Rows` 直接绑定 TextInput），删除走新加的 `State.RemoveAt(i)`，改完调 `State.OnChange()` 立刻落盘；遍历用 `append([]widgets.Row(nil), rows...)` 快照并检查下标。
-  - **验证方式**：`internal/app/env_test.go` 的 `TestEnvironmentManagerHasTwoColumns`（左列表在编辑器左侧、变量名/值/删除在同一行、页面里没有「添加行」、删除图标是 `Palette.Danger`）、`TestEnvironmentVariableRowDeletesItself`（点删除后环境里少了 `BaseURL`、行数回到「剩下的 + 空行」）、`TestEnvironmentMenuMarksTheActiveOne`（激活的环境有主题色打勾与底色，其它行保持面板底色）；`internal/app/main_test.go` 的 `TestRequestTabs` 改为按「键第 1 行」判断 Params 列表在。
+  - **验证方式**：`internal/app/env_test.go` 的 `TestEnvironmentManagerHasTwoColumns`（左列表在编辑器左侧、变量名/值/删除在同一行、页面里没有「添加行」、删除图标是 `Palette.Danger`）、`TestEnvironmentVariableRowDeletesItself`（点删除后环境里少了 `baseurl`、行数回到「剩下的 + 空行」）、`TestEnvironmentMenuMarksTheActiveOne`（激活的环境有主题色打勾与底色，其它行保持面板底色）；`internal/app/main_test.go` 的 `TestRequestTabs` 改为按「键第 1 行」判断 Params 列表在。
   - **适用范围**：`internal/widgets/kvlist.go`（`View`/`RemoveAt`）、`internal/app/view_env.go`（`envList`/`envRow`/`envEditor`/`envVarRow`）、`internal/app/view_tabs.go`（`environmentPicker`）；以后任何「同一种状态、不同列布局」的列表。
 - **标题**：改名要连带改名磁盘文件；树表跟磁盘走——打开时整份重读、之后由目录监听驱动
   - **触发信号**：在标签里重命名请求后，树表和标签页是旧名、磁盘文件名没变；用编辑器改了集合目录里的接口，App 里看不到；接口目录里冒出 `xxx.yaml.tmp` 半截文件。
@@ -496,6 +496,27 @@
   - **正确做法**：折叠按钮放进 `internal/app/view_footer.go` 的 `footer()` 最左侧（`a.active != ""` 时才画），`ui.ButtonBase` 20×20、无 `Background`/`Border`，只挂 `ui.Icon`（13 号 `TextMuted`），悬浮才铺 `SurfaceHover`；两态用两个图标：展开时 `icons.SidebarClose`（面板 + 箭头朝左，点了收起），收起时 `icons.SidebarOpen`（箭头朝右）；无障碍名保持「收起接口面板」/「展开接口面板」。收起时 `collectionWorkspace` 里整块 `requestsPanel` 连分隔线一起不画。
   - **验证方式**：`TestSidebarFoldsAway`（点「收起接口面板」后树消失、请求页还在、按钮变「展开接口面板」，再点树回来）；截图 `docs/shots/request-filled.png` 与 `docs/shots/sidebar-collapsed.png` 的状态栏最左侧两个不同图标。
   - **适用范围**：`internal/app/view_footer.go`（`footer`/`sidebarToggle`）、`internal/app/view.go`（`collectionWorkspace`）、`internal/icons`（`SidebarClose`/`SidebarOpen`）；以后「放在窗口边缘的开关」优先进状态栏或标签条，真的需要浮在内容上时再用 `Overlay` + `AttachTo`。
+
+- **标题**：导入 OpenAPI/Swagger 分两层——`internal/openapi` 只把文档读成接口，`store.Import` 管落盘与同名覆盖
+  - **触发信号**：要做「导入集合」，直接照着 `AddRequest`/`AddFolder` 一个个写文件会立刻撞上三件事：名字里带 `/`、`:` 等字符，同一份文档里两个接口重名，以及重复导入时不知道该覆盖谁。
+  - **根因/约束**：文档是外来的动态结构（`map[string]any`，YAML 解码器把 JSON 也一起吃下），而集合的落盘规则是「一个接口一个文件、文件名即接口名、同层唯一」。把两者混在一个包里，解析测试就得搭磁盘；而直接 `AddRequest` 一条条写，每次都要整集 `saveCollection`，还会在「同名覆盖」上丢掉文件既有的 `Path/Name`。
+  - **正确做法**：①`internal/openapi` 只做纯函数 `Parse([]byte) (*Document, error)`，返回 `Title/Spec/APIVersion/BaseURL` + `Requests`（无 tag）+ `Folders`（按 tag 首次出现的顺序），`Row{Key,Value}` 自成一类；`$ref` 在文档内解析并**用 `refs` 集合 + `exampleDepth` 双重封顶**，否则自引用的 schema（`Pet.owner → Pet`）会递归到爆栈。②`server` 缺失或是相对路径时，接口地址保留 `/path` 形式（应用按「以 `/` 开头就接 `baseurl`」的规则拼接，见后一条经验）。③落盘统一走 `store.Import(ImportOptions)`：按 `Name` 找现有集合（有则更新、无则新建），`mergeFolder` **按 `safeFileName` 后的名字**匹配文件夹与接口，命中就整条覆盖但**保留既有的 `Path/Name`**，最后 `normalizeTree` 一次分配路径、净化名字、给重名编号；新集合再补三个默认环境，并把文档的 server 写进第一个环境的 `baseurl`。
+  - **验证方式**：`go test ./internal/openapi/`（v3/v2/fetch/自环 schema/重名编号）、`internal/store/import_test.go`（新建成集 + 落盘文件、同名覆盖且不动无关接口、同名 tag 合并且重名编号）、`internal/app/import_test.go`（弹窗打开、选文件、拖拽 `tt.DropFiles`、URL 读取、失败提示、同名集合提示 + 覆盖）。
+  - **适用范围**：`internal/openapi/**`、`internal/store/service_import.go`、`internal/app/{view_import,import}.go`；以后加 Postman/Insomnia 导入时复用 `store.Import`，只需要再写一个「文档 → `store.Folder`」的转换。
+
+- **标题**：文件拖拽用 `Element.DroppedFiles()`/`FileDragOver()`，测试用 `Tester.DropFiles` 才能覆盖
+  - **触发信号**：导入弹窗要「点击或拖拽文件到本区域导入」，但不确定 native UI 是否支持从资源管理器拖入，或写了拖拽后测试点不到。
+  - **根因/约束**：MyGo 的文件拖放不是系统菜单或剪贴板，而是 `flagDropTarget`：**每帧都要调用** `DroppedFiles()`（返回值是「上一帧以来」落下的路径）或 `FileDragOver()` 才会登记为投放目标；`transfer.FileList` 那套 `ui.DropData` 是另一条通用拖放通道，文件用前者更直接。`Tester` 有 `DropFiles(x, y, paths...)`，返回 false 说明坐标下没有元素认领。
+  - **正确做法**：拖放区域做成一个带 `Label()` 的可点元素（`ui.Column` 即可，纯文本子元素不抢点击），每帧先读 `FileDragOver()` 改边框/底色做提示，再读 `DroppedFiles()` 取 `[0]` 去解析；点击走 `chooseDoc`（`mygo.Dialog.Open` + `Filters` 限定 json/yaml/yml）。
+  - **验证方式**：`TestImportTakesADroppedFile`（`tt.Find("选择文档文件")` 中心点 `tt.DropFiles(...)` 后摘要出现）；真实窗口里从资源管理器拖一个 json 进去。
+  - **适用范围**：`internal/app/view_import.go`（`importDropZone`）、`internal/app/run.go`（`chooseDocument`）；任何「拖文件进来」的区域。
+
+- **标题**：地址以 `/` 开头就接 `baseurl`：拼接放在 `app.targetURL`，前缀画进地址框内部，`baseurl` 在环境弹窗里是独立且删不掉的一项
+  - **触发信号**：希望「接口只写 `/ws`，主机由环境给」，且地址框里要直接看到当前环境的前缀（例如 `192.168.110.53:6976` `/ws`），而不是让用户自己敲 `{{baseurl}}/ws`。
+  - **根因/约束**：`req.ResolveVars` 只做 `{{name}}` 替换，`req.BuildRequest` 在缺 scheme 时会补 `https://`——对一个 `ip:port` 的 baseurl 补 https 往往连不上，WebSocket 更是必须 `ws://`。所以「补什么 scheme」取决于接口类型，只有 app 层知道（`tab.kind`），不能塞进 `req`。另外 `ui.TextInput` 自带边框/背景，单独画一个胶囊当前缀会读成两个控件，用户要的是「一个输入框」。
+  - **正确做法**：①拼接一处收口：`internal/app/target.go` 的 `a.targetURL(t)`——`strings.HasPrefix(raw, "/")` 时取 `VarsFor(active)[store.BaseURLVariable]`（去尾部 `/`），空的返回 `missing=[baseurl]`；没有 `://` 的按 `schemeOf(kind)` 补（WebSocket/Socket.IO 补 `ws`，其余 `http`），拼好再走 `req.ResolveVars`；`send` 与 `connectSocket` 都必须用它，缺前缀的提示由 `missingText` 统一成「URL 以 / 开头，但当前环境没有设置前置URL」。②前缀画进框里：自己搭外框（`Surface` 底 + 1px 边框 + 圆角 + 高 40 + 左右内边距 10），里面先 `ui.Text` 画前缀（mono、`TextMuted`、只读），再 `ui.TextInputBase`（**Base 版没有边框/背景**）`Grow(1)`，两者无间距；前缀为空就只画输入框；焦点环画在外框上（`input.Focused()` 时给外框换 `Accent` 边框），因为内层 Base 输入没有焦点边框。③`baseurl` 在环境弹窗里从变量列表里拆出来单独一项：`editEnvironment` 用 `baseURLOf` 把 `baseurl` 抽进 `a.envBaseURL`（行里不再有它，所以没有删除按钮、删不掉），`saveEnvEdits` 用 `withBaseURL` 把它作为第一行写回；变量名统一 `store.BaseURLVariable = "baseurl"`，旧版本的 `BaseURL` 在 `readEnvironments`/`loadGlobalEnvironments` 里由 `migrateBaseURL` 改写。
+  - **验证方式**：`internal/app/target_test.go` 的 `TestSendReadsPathUnderBaseURL`（`/pets?limit=10` → path `/pets`，界面出现前缀）、`TestSendReadsAddressWithoutScheme`（`host:port` 按 http 连）、`TestSendRefusesAPathWithoutBaseURL`（空前缀时不显示前缀、发送给提示）、`TestRequestLinePrefixFollowsTheAddress`（前缀只在 `/` 开头时出现，且落在外框内）、`TestSocketConnectsUnderBaseURL`（`/ws` + `host:port` → `ws://` 连上 echo socket）；`env_test.go` 的 `TestEnvironmentPrefixURLEditsAndKeeps`（改完保存后 `baseurl` 是第一行、变量值可读）与 `TestEnvironmentVariableRowDeletesItself`（删变量不会删掉前缀，保存后只剩 `baseurl`）。注意：弹窗里「前置URL（baseurl）」标题文字与输入框 label「前置URL」必须不同，否则 `Tester.Find` 会命中标题、点击落空。
+  - **适用范围**：`internal/app/target.go`、`view_request.go`（`addressField`）、`view_websocket.go`（`socketLine`）、`view_prefix.go`（`prefixURLField`/`baseURLOf`/`withBaseURL`）、`socket.go`、`internal/store/service_env.go`、`internal/openapi/servers.go`（相对 server 输出 `/path`）；以后任何「地址拼接」都走 `targetURL`，别在视图里自己拼。
 
 ## 编码与重构规范
 

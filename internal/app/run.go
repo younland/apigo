@@ -48,6 +48,7 @@ func Run() {
 		a.opener = mygo.Shell.OpenPath
 		a.chooseDir = chooseDirectory
 		a.chooseFile = chooseUpload
+		a.chooseDoc = chooseDocument
 		// The tree follows the files another program changes in the open
 		// collection's directory.
 		a.watch = watchFiles
@@ -101,6 +102,23 @@ func chooseUpload() (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Title:       "选择要上传的文件",
 		ButtonLabel: "选择",
+	})
+	if err != nil || len(paths) == 0 {
+		return "", err
+	}
+	return paths[0], nil
+}
+
+// chooseDocument asks the desktop for the OpenAPI or Swagger document an
+// import reads, "" when the user cancels.
+func chooseDocument() (string, error) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Title:       "选择 OpenAPI/Swagger 文档",
+		ButtonLabel: "导入",
+		Filters: []mygo.FileFilter{
+			{Name: "OpenAPI/Swagger", Extensions: []string{"json", "yaml", "yml"}},
+			{Name: "所有文件", Extensions: []string{"*"}},
+		},
 	})
 	if err != nil || len(paths) == 0 {
 		return "", err
