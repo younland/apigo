@@ -197,12 +197,14 @@ func carriesBody(method string) bool {
 const DefaultMaxResponse = 100 << 20
 
 // Execute sends the request and reads the response, capped at limit bytes: a
-// limit of zero or less takes DefaultMaxResponse.
+// limit of zero or less takes DefaultMaxResponse. How long it is waited for is
+// the deadline of ctx, which the app sets from its settings: the client keeps
+// none of its own, so a slow server is read for as long as the reader asked.
 func Execute(ctx context.Context, req *http.Request, limit int64) *Response {
 	if limit <= 0 {
 		limit = DefaultMaxResponse
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{}
 	start := time.Now()
 	resp, err := client.Do(req.WithContext(ctx))
 	if err != nil {

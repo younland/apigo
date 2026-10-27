@@ -1,7 +1,7 @@
 name: Package
 
 # 打 tag（如 v0.1.0）或手动触发时构建三平台产物：
-#   Windows → apigo.exe（便携）与 "apigo Setup <版本> amd64.exe"（NSIS 安装包，
+#   Windows → apigo.exe（便携）与 "apigo-setup-<版本>-amd64.exe"（NSIS 安装包，
 #             mygo build 在 Windows 上自行下载 NSIS）
 #   macOS   → 通用包（arm64 + amd64）的 .app 与 .dmg（磁盘映像只能在 macOS 上做；
 #             mygo.json 未配置 macos.signingIdentity，产物未签名）
@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp "build/windows-amd64/apigo Setup ${APP_VERSION} amd64.exe" \
+          cp "build/windows-amd64/apigo-setup-${APP_VERSION}-amd64.exe" \
              "dist/apigo-${APP_VERSION}-windows-amd64-setup.exe"
           cp "build/windows-amd64/apigo.exe" \
              "dist/apigo-${APP_VERSION}-windows-amd64-portable.exe"

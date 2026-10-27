@@ -277,8 +277,18 @@ func (a *app) settingsSections(c *ui.Context, p design.Palette) {
 			a.settingsLabel(c, p, "语言")
 			a.languagePicker(c, p)
 			ui.Row(c).Height(design.RowGap)
-			a.settingsLabel(c, p, "响应体上限（MB）")
-			a.responseLimitField(c, p)
+			// The two limits sit side by side: both are one number, and the pane
+			// has room for the sections under them only if they share a row.
+			ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).Grow(1).Gap(6).Children(func() {
+					a.settingsLabel(c, p, "响应体上限（MB）")
+					a.responseLimitField(c, p)
+				})
+				ui.Column(c).Grow(1).Gap(6).Children(func() {
+					a.settingsLabel(c, p, "请求超时（秒）")
+					a.timeoutField(c, p)
+				})
+			})
 			ui.Row(c).Height(design.RowGap)
 			a.settingsLabel(c, p, "更新")
 			a.autoUpdateField(c, p)
@@ -354,8 +364,20 @@ func (a *app) responseLimitField(c *ui.Context, p design.Palette) {
 	if input.Changed() {
 		a.saveSettingsOrToast(c)
 	}
-	ui.Text(c, "响应体超过上限会被截断，默认 100 MB").
-		FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+	ui.Text(c, "超出上限会被截断，默认 100 MB").
+		FontSize(design.FontSizeTiny).TextColor(p.TextMuted).Wrap()
+}
+
+// timeoutField edits how long a request is waited for, in seconds: a request
+// that takes longer is given up, saying it timed out.
+func (a *app) timeoutField(c *ui.Context, p design.Palette) {
+	input := ui.NumberInput(c, &a.timeoutSeconds,
+		minTimeoutSeconds, maxTimeoutSeconds, 1).Width(120).Label("请求超时 秒")
+	if input.Changed() {
+		a.saveSettingsOrToast(c)
+	}
+	ui.Text(c, "到点即中止，默认 1800 秒（30 分钟）").
+		FontSize(design.FontSizeTiny).TextColor(p.TextMuted).Wrap()
 }
 
 // autoUpdateField turns the check for a newer version on or off, and asks for

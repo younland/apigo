@@ -47,7 +47,7 @@ func (a *app) responsePlayer(c *ui.Context, p design.Palette, t *tab) {
 		ui.Row(c).Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
 			a.playButton(c, p, t)
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, downloadName(t.resp, t.url)).FontSize(design.FontSizeBody).
+				ui.Text(c, downloadName(t.resp, t.sentAddress())).FontSize(design.FontSizeBody).
 					TextColor(p.Text).SingleLine()
 				a.playBar(c, p, t)
 				ui.Text(c, playText(t)+" · "+mediaDetail(t.resp)).
@@ -96,7 +96,7 @@ func (a *app) responseFile(c *ui.Context, p design.Palette, t *tab) {
 	}
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(design.RowGap).Children(func() {
 		ui.Icon(c, icon).FontSize(32).TextColor(p.TextMuted)
-		ui.Text(c, downloadName(t.resp, t.url)).FontSize(design.FontSizeBody).Bold().
+		ui.Text(c, downloadName(t.resp, t.sentAddress())).FontSize(design.FontSizeBody).Bold().
 			TextColor(p.Text).SingleLine()
 		ui.Text(c, mediaDetail(t.resp)).FontSize(design.FontSizeTiny).
 			TextColor(p.TextMuted).SingleLine()

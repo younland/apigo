@@ -3,12 +3,12 @@ package openapi
 import "strings"
 
 // parameters reads what an operation takes: its query parameters as rows of the
-// Parameters pane, its header parameters as rows of the Headers pane. A
-// parameter of the path itself applies to every operation under it, and the
-// operation's own definition of the same name wins.
-func (d *doc) parameters(op, at node) ([]Row, []Row) {
+// Query pane, the values its path takes as rows of the Path pane, and its header
+// parameters as rows of the Headers pane. A parameter of the path itself applies
+// to every operation under it, and the operation's own definition of the same
+// name wins.
+func (d *doc) parameters(op, at node) (params, pathParams, headers []Row) {
 	seen := map[string]bool{}
-	var params, headers []Row
 	for _, owner := range []node{op, at} {
 		for _, param := range d.nodesOf(owner, "parameters") {
 			key := param.text("in") + " " + param.text("name")
@@ -16,16 +16,22 @@ func (d *doc) parameters(op, at node) ([]Row, []Row) {
 				continue
 			}
 			seen[key] = true
-			row := Row{Key: param.text("name"), Value: d.paramValue(param)}
+			row := Row{
+				Key:         param.text("name"),
+				Value:       d.paramValue(param),
+				Description: oneLine(param.text("description")),
+			}
 			switch param.text("in") {
 			case "query":
 				params = append(params, row)
+			case "path":
+				pathParams = append(pathParams, row)
 			case "header":
 				headers = append(headers, row)
 			}
 		}
 	}
-	return params, headers
+	return params, pathParams, headers
 }
 
 // paramValue is the value a parameter is written with: the example the document

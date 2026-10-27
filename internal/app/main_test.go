@@ -121,7 +121,7 @@ func TestRequestTabs(t *testing.T) {
 	a := testApp(t)
 	tt := ui.NewTester(a.view, 1280, 800)
 
-	if !tt.HasText("键第 1 行") {
+	if !tt.HasText("参数名第 1 行") {
 		t.Fatalf("texts %q, want the Params key/value list first", tt.Texts())
 	}
 	// The panes still to come are not shown yet.
@@ -386,7 +386,7 @@ func TestSendRequest(t *testing.T) {
 
 	a := testApp(t)
 	a.current().url = server.URL
-	a.current().params.Rows = []widgets.Row{{Enabled: true, Key: "limit", Value: "10"}}
+	a.current().params.Rows = []widgets.Param{{Enabled: true, Key: "limit", Value: "10"}}
 	tt := ui.NewTester(a.view, 1280, 800)
 
 	if err := tt.Click("发送"); err != nil {
@@ -549,7 +549,8 @@ func TestSettingsModal(t *testing.T) {
 	}
 	for _, want := range []string{"通用", "语言", "简体中文", "主题", "背景", "强调色",
 		"系统（亮色）", "数据目录", "更换目录", "打开目录", "版本",
-		"响应体上限（MB）", "响应体超过上限会被截断，默认 100 MB"} {
+		"响应体上限（MB）", "超出上限会被截断，默认 100 MB",
+		"请求超时（秒）", "到点即中止，默认 1800 秒（30 分钟）"} {
 		if !tt.HasText(want) {
 			t.Errorf("texts %q, want %q in the settings", tt.Texts(), want)
 		}
@@ -1164,7 +1165,7 @@ func TestCloseTabWritesInterfaceFile(t *testing.T) {
 	if err := tt.Click("请求 Pets"); err != nil {
 		t.Fatal(err)
 	}
-	a.current().params.Rows = []widgets.Row{{Enabled: true, Key: "limit", Value: "10"}}
+	a.current().params.Rows = []widgets.Param{{Enabled: true, Key: "limit", Value: "10"}}
 	// The edit marks the tab unsaved, which widens it by the dot: a frame shows
 	// where its buttons are now.
 	tt.Frame()

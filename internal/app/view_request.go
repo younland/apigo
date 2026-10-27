@@ -148,7 +148,7 @@ func (a *app) requestPanel(c *ui.Context, p design.Palette, t *tab) {
 	ui.Column(c).Grow(1).FillWidth().Children(func() {
 		switch t.reqTab {
 		case 0:
-			t.params.View(c, p)
+			a.paramsPanel(c, p, t)
 		case 1:
 			t.headers.View(c, p)
 		case 2:
@@ -156,6 +156,23 @@ func (a *app) requestPanel(c *ui.Context, p design.Palette, t *tab) {
 		default:
 			ui.Text(c, "该面板尚未实现").FontSize(design.FontSizeBody).TextColor(p.TextMuted)
 		}
+	})
+}
+
+// paramsPanel draws what a request takes: its query parameters, which follow the
+// address, and the values its path takes, which the address names. A request
+// whose address takes no path parameters has no path table at all.
+func (a *app) paramsPanel(c *ui.Context, p design.Palette, t *tab) {
+	t.syncPathParams()
+	// The two tables scroll together: a path of many parameters pushes the second
+	// one down rather than out of the pane.
+	noScrollbars(ui.Scroll(c)).Grow(1).FillWidth().Children(func() {
+		ui.Column(c).FillWidth().Gap(design.PanelPadding).Children(func() {
+			t.params.View(c, p, "Query 参数")
+			if len(t.pathParams.Rows) > 0 {
+				t.pathParams.View(c, p, "Path 参数")
+			}
+		})
 	})
 }
 
@@ -200,8 +217,9 @@ func (a *app) formRows(c *ui.Context, p design.Palette, t *tab, format bodyForma
 	if format.Key == "form-data" {
 		t.form.ChooseFile = func() (string, string, error) { return a.pickFormFile(c, t) }
 		t.form.FileDropped = func(rel string) { a.dropFormFile(t, rel) }
+		t.form.Thumbnail = a.fileThumbnail(a.staticScope(t))
 	} else {
-		t.form.ChooseFile, t.form.FileDropped = nil, nil
+		t.form.ChooseFile, t.form.FileDropped, t.form.Thumbnail = nil, nil, nil
 	}
 	t.form.View(c, p)
 }

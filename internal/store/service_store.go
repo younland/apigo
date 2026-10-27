@@ -29,19 +29,24 @@ type Row struct {
 	// FileName the name it had when it was chosen.
 	File     string `yaml:"file,omitempty"`
 	FileName string `yaml:"fileName,omitempty"`
+	// Description says what a parameter is for: it is written down for the
+	// reader of an interface, and sent with nothing.
+	Description string `yaml:"description,omitempty"`
 }
 
 // savedRequest is one interface file, named after the interface itself.
 type Request struct {
-	Path     string `yaml:"-"` // the interface's place in the tree
-	Name     string `yaml:"-"` // the file name without its extension
-	Kind     Kind   `yaml:"kind"`
-	Method   string `yaml:"method,omitempty"`
-	URL      string `yaml:"url,omitempty"`
-	Params   []Row  `yaml:"params,omitempty"`
-	Headers  []Row  `yaml:"headers,omitempty"`
-	BodyType string `yaml:"bodyType,omitempty"`
-	Body     string `yaml:"body,omitempty"`
+	Path   string `yaml:"-"` // the interface's place in the tree
+	Name   string `yaml:"-"` // the file name without its extension
+	Kind   Kind   `yaml:"kind"`
+	Method string `yaml:"method,omitempty"`
+	URL    string `yaml:"url,omitempty"`
+	Params []Row  `yaml:"params,omitempty"`
+	// PathParams are the values the {names} of the URL are sent with.
+	PathParams []Row  `yaml:"pathParams,omitempty"`
+	Headers    []Row  `yaml:"headers,omitempty"`
+	BodyType   string `yaml:"bodyType,omitempty"`
+	Body       string `yaml:"body,omitempty"`
 	// Form holds the rows of form-data and x-www-form-urlencoded bodies.
 	Form []Row `yaml:"form,omitempty"`
 	// Protocol is the subprotocol a WebSocket request asks the server for.

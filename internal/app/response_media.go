@@ -166,7 +166,7 @@ func (a *app) saveResponse(c *ui.Context, t *tab) {
 	if dir == "" {
 		return // the reader cancelled: nothing to say
 	}
-	path, err := writeDownload(dir, downloadName(t.resp, t.url), t.resp.Raw)
+	path, err := writeDownload(dir, downloadName(t.resp, t.sentAddress()), t.resp.Raw)
 	if err != nil {
 		c.Toast("保存失败：" + err.Error())
 		return

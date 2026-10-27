@@ -41,15 +41,19 @@ type Request struct {
 	Method   string
 	URL      string
 	Params   []Row
+	Path     []Row
 	Headers  []Row
 	BodyType string
 	Body     string
 	Form     []Row
 }
 
-// Row is one parameter, header or form field: its name and the value the
-// document suggests for it.
-type Row struct{ Key, Value string }
+// Row is one parameter, header or form field: its name, the value the document
+// suggests for it, and what it is for.
+type Row struct {
+	Key, Value  string
+	Description string
+}
 
 // RequestCount counts the interfaces of the document, folders and all.
 func (d *Document) RequestCount() int {

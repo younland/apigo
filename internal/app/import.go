@@ -221,24 +221,29 @@ func importTree(doc *openapi.Document) folder {
 // request with what the document says it takes and sends.
 func importedRequest(req openapi.Request) savedRequest {
 	return savedRequest{
-		Kind:     kindREST,
-		Name:     req.Name,
-		Method:   req.Method,
-		URL:      req.URL,
-		Params:   rowsFromImport(req.Params),
-		Headers:  rowsFromImport(req.Headers),
-		BodyType: req.BodyType,
-		Body:     req.Body,
-		Form:     rowsFromImport(req.Form),
+		Kind:       kindREST,
+		Name:       req.Name,
+		Method:     req.Method,
+		URL:        req.URL,
+		Params:     rowsFromImport(req.Params),
+		PathParams: rowsFromImport(req.Path),
+		Headers:    rowsFromImport(req.Headers),
+		BodyType:   req.BodyType,
+		Body:       req.Body,
+		Form:       rowsFromImport(req.Form),
 	}
 }
 
 // rowsFromImport turns the rows of a document into the rows an interface
-// keeps, each one enabled: what the document suggests is what it sends.
+// keeps, each one enabled: what the document suggests is what it sends. The type
+// and description a parameter carries are kept beside it.
 func rowsFromImport(rows []openapi.Row) []savedRow {
 	out := make([]savedRow, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, savedRow{Enabled: true, Key: row.Key, Value: row.Value})
+		out = append(out, savedRow{
+			Enabled: true, Key: row.Key, Value: row.Value,
+			Description: row.Description,
+		})
 	}
 	return out
 }

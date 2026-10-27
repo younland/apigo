@@ -214,18 +214,60 @@ func TestShots(t *testing.T) {
 				a.openRequest("collection-1", req)
 			}
 		}},
-		{"request-filled", design.Light, func(a *app) {
+		{"tree-long-names", design.Light, func(a *app) {
+			// Names too long for the 264 wide tree: each row shortens its name,
+			// and keeps its method whole.
 			*a = *demoApp()
+			col := a.store.Collection("collection-1")
+			if col == nil {
+				return
+			}
+			col.Root.Folders = append(col.Root.Folders, folder{
+				Path: "分组", Name: "分组",
+				Requests: []savedRequest{
+					{Path: "分组/1", Name: "请求网络图片", Kind: kindREST, Method: "GET"},
+					{Path: "分组/2", Name: "请求网络视频", Kind: kindREST, Method: "GET"},
+					{Path: "分组/3", Name: "请求网络视频2-请求网络视频2-请求网络视频2",
+						Kind: kindREST, Method: "GET"},
+					{Path: "分组/4", Name: "上传测试一个很长很长的接口名字", Kind: kindREST,
+						Method: "POST"},
+					{Path: "分组/5", Name: "删除一个很长很长的接口名字看看", Kind: kindREST,
+						Method: "DELETE"},
+				},
+			})
+		}},
+		{"request-filled", design.Light, func(a *app) {
+			// The second tab is the one in view, so it is the one filled in.
+			*a = *demoApp()
+			a.addTab(a.space())
 			t := a.current()
+			t.method = "POST"
 			t.url = "https://api.example.com/v1/pets"
-			t.params.Rows = []widgets.Row{
+			t.params.Rows = []widgets.Param{
 				{Enabled: true, Key: "limit", Value: "10"},
 				{Enabled: true, Key: "cursor", Value: "eyJpZCI6MTB9"},
 				{Enabled: false, Key: "debug", Value: "1"},
 			}
 			t.headers.Rows = []widgets.Row{{Enabled: true, Key: "Accept", Value: "application/json"}}
-			a.addTab(a.space())
-			a.current().method = "POST"
+		}},
+		{"request-params", design.Light, func(a *app) {
+			// The two tables of the 参数 pane: the query parameters it sends, and
+			// the value its path takes, named by the address itself.
+			*a = *demoApp()
+			// The pane takes more room than it opens with: the two tables are
+			// taller than the one pane the split gives them.
+			a.percent = 70
+			t := a.current()
+			t.url = "https://api.example.com/v1/pets/{petId}"
+			t.params.Rows = []widgets.Param{
+				{Enabled: true, Key: "datasource",
+					Description: "The server name you would like data from"},
+				{Enabled: true, Key: "page",
+					Description: "Which page of results to return"},
+				{Enabled: true, Key: "token",
+					Description: "Access token to use if unable to set a header"},
+			}
+			a.current().pathParams.Rows = nil
 		}},
 		{"request-baseurl", design.Light, func(a *app) {
 			// The address is a path under the baseurl of the environment: the
@@ -391,8 +433,12 @@ func TestShots(t *testing.T) {
 			t.url = "https://api.example.com/v1/pets"
 			t.reqTab = 2
 			t.bodyType = "form-data"
+			// A picture the field shows beside its name, and a file it names only.
 			t.form.Rows = []widgets.Row{
-				{Enabled: true, Key: "参数 1", File: "static/2025-10-20/9f2c", FileName: "Vue-Go冲锋Logo.png"},
+				{Enabled: true, Key: "参数 1", FileName: "Vue-Go冲锋Logo.png",
+					File: shotStatic("collection-1", shotPicture(), "logo.png")},
+				{Enabled: true, Key: "附件", FileName: "宠物报告.pdf",
+					File: shotStatic("collection-1", []byte("%PDF-1.7 a report"), "report.pdf")},
 				{Enabled: true, Key: "备注", Value: "说明文本"},
 				{Enabled: true},
 			}
@@ -538,4 +584,18 @@ func socketShot(a *app) {
 // shotTime is a moment of a shot's log, at fixed offsets from a fixed time.
 func shotTime(seconds int) time.Time {
 	return time.Date(2026, 10, 21, 8, 32, seconds, 0, time.UTC)
+}
+
+// shotStatic keeps a file in a shot's collection, as an upload would, and returns
+// the path the interface keeps it at.
+func shotStatic(collectionID string, data []byte, name string) string {
+	rel := "static/2025-10-20/" + name
+	path := filepath.Join(shotStore, "collections", collectionID, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return rel
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return rel
+	}
+	return rel
 }

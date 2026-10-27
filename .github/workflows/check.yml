@@ -68,5 +68,5 @@ jobs:
           set -euo pipefail
           ls -l build/windows-amd64
           test -f build/windows-amd64/apigo.exe
-          compgen -G "build/windows-amd64/apigo Setup *.exe" >/dev/null \
+          compgen -G "build/windows-amd64/apigo-setup-*.exe" >/dev/null \
             || { echo "::error::缺少 NSIS 安装包"; exit 1; }

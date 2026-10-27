@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"apigo/internal/design"
 	"apigo/internal/req"
@@ -55,6 +56,14 @@ const (
 	maxResponseLimitMB     = 10240
 )
 
+// The limits a request is waited for under, in seconds: half an hour by
+// default, and the smallest and largest the settings hold.
+const (
+	defaultTimeoutSeconds = 30 * 60
+	minTimeoutSeconds     = 1
+	maxTimeoutSeconds     = 24 * 60 * 60
+)
+
 // tab is one request of the tab strip: its own method, URL, parameters,
 // headers, body and response, as Hoppscotch keeps one document per tab.
 type tab struct {
@@ -67,12 +76,15 @@ type tab struct {
 	title        string
 	reqTab       int
 
-	params   widgets.State
-	headers  widgets.State
-	form     widgets.State // the rows of form-data and x-www-form-urlencoded
-	bodyType string
-	body     *editor.Buffer
-	bodyEdit editor.State
+	params widgets.Params
+	// pathParams are the values the {names} of the address are sent with: its
+	// rows follow the address, so the reader fills in values, not names.
+	pathParams widgets.Params
+	headers    widgets.State
+	form       widgets.State // the rows of form-data and x-www-form-urlencoded
+	bodyType   string
+	body       *editor.Buffer
+	bodyEdit   editor.State
 
 	loading  bool
 	resp     *response
@@ -87,6 +99,10 @@ type tab struct {
 	// sentHeaders are the headers the last request went out with, which the
 	// response pane lists.
 	sentHeaders http.Header
+	// sentURL is the address the last request went out to, its variables, its
+	// baseurl and its path filled in: what the server saw, and what a response
+	// names its file after.
+	sentURL string
 	// The response is shown by what it holds: a picture and a sound are drawn
 	// from these, and anything else is offered as a file.
 	view        responseBody
@@ -116,6 +132,9 @@ type tab struct {
 func newTab() *tab {
 	t := &tab{kind: kindREST, method: "GET", title: "Untitled", bodyType: "json",
 		clearOnSend: true}
+	// A path takes its parameters from its address: the table reads them, and
+	// the reader fills in the values.
+	t.pathParams.Fixed = true
 	t.body = editor.NewBuffer("")
 	t.body.SetLanguage(editor.LanguageFor("body.json"))
 	t.bodyEdit.Buffer = t.body
@@ -173,7 +192,15 @@ func (t *tab) cancelRename() {
 func (t *tab) snapshot() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\x00%s\x00%s\x00%s\x00%s\x00", t.kind, t.method, t.url, t.title, t.bodyType)
-	for _, list := range [][]widgets.Row{t.params.Rows, t.headers.Rows, t.form.Rows} {
+	for _, r := range t.params.Rows {
+		fmt.Fprintf(&b, "%v|%s|%s|%s\x00", r.Enabled, r.Key, r.Value, r.Description)
+	}
+	b.WriteString("\x01")
+	for _, r := range t.pathParams.Rows {
+		fmt.Fprintf(&b, "%v|%s|%s|%s\x00", r.Enabled, r.Key, r.Value, r.Description)
+	}
+	b.WriteString("\x01")
+	for _, list := range [][]widgets.Row{t.headers.Rows, t.form.Rows} {
 		for _, r := range list {
 			fmt.Fprintf(&b, "%v|%s|%s|%s|%s\x00", r.Enabled, r.Key, r.Value, r.File, r.FileName)
 		}
@@ -268,8 +295,13 @@ type app struct {
 	saveErr        string           // the interface write that failed, shown once
 	languageOpen   bool             // the language menu of the settings
 	// maxResponseMB is how much of a response the app reads, as the settings
-	// edit it in megabytes.
-	maxResponseMB float64
+	// edit it in megabytes, and timeoutSeconds how long it waits for one.
+	maxResponseMB  float64
+	timeoutSeconds float64
+
+	// thumbs are the small pictures of uploaded files, by the collection and the
+	// path each is kept at: a form asks for the same one every frame.
+	thumbs map[string]*ui.Bitmap
 
 	// autoUpdate makes the app look for a newer version at startup, off until
 	// the reader turns it on. checkingUpdate says a check is on its way, and
@@ -333,14 +365,15 @@ type app struct {
 
 func newApp() *app {
 	return &app{
-		mode:          design.System,
-		applied:       design.Mode(-1),
-		accent:        design.DefaultAccent.Name,
-		language:      languages[0],
-		percent:       55,
-		maxResponseMB: defaultResponseLimitMB,
-		spaces:        map[string]*workspace{},
-		store:         store.New(""),
+		mode:           design.System,
+		applied:        design.Mode(-1),
+		accent:         design.DefaultAccent.Name,
+		language:       languages[0],
+		percent:        55,
+		maxResponseMB:  defaultResponseLimitMB,
+		timeoutSeconds: defaultTimeoutSeconds,
+		spaces:         map[string]*workspace{},
+		store:          store.New(""),
 	}
 }
 
@@ -517,7 +550,9 @@ func (a *app) duplicateTab(ws *workspace, i int) {
 	dup.kind, dup.collectionID = src.kind, src.collectionID
 	dup.method, dup.url, dup.title = src.method, src.url, src.title
 	dup.bodyType = src.bodyType
-	dup.params.Rows = append([]widgets.Row(nil), src.params.Rows...)
+	dup.params.Rows = append([]widgets.Param(nil), src.params.Rows...)
+	dup.pathParams.Rows = append([]widgets.Param(nil), src.pathParams.Rows...)
+	dup.pathParams.Fixed = true
 	dup.headers.Rows = append([]widgets.Row(nil), src.headers.Rows...)
 	dup.form.Rows = append([]widgets.Row(nil), src.form.Rows...)
 	dup.body.Set(src.body.String())
@@ -856,7 +891,9 @@ func (a *app) openRequest(collectionID string, r savedRequest) {
 	}
 	t.url = r.URL
 	t.protocol = r.Protocol
-	t.params.Rows = rowsFromSaved(r.Params)
+	t.params.Rows = paramsFromSaved(r.Params)
+	t.pathParams.Rows = paramsFromSaved(r.PathParams)
+	t.pathParams.Fixed = true
 	t.headers.Rows = rowsFromSaved(r.Headers)
 	t.form.Rows = rowsFromSaved(r.Form)
 	if r.BodyType != "" {
@@ -877,7 +914,7 @@ func (a *app) openRequest(collectionID string, r savedRequest) {
 // request was configured with, the parameters when it has none: parameters,
 // headers, then body.
 func (t *tab) firstPaneWithData() int {
-	if len(t.params.Enabled()) > 0 {
+	if len(t.params.Enabled()) > 0 || len(t.pathParams.Enabled()) > 0 {
 		return 0
 	}
 	if len(t.headers.Enabled()) > 0 {
@@ -943,13 +980,14 @@ func (a *app) saveCurrentToCollection(collectionID string) error {
 // savedFromTab is the interface a tab's request stands for.
 func savedFromTab(t *tab) savedRequest {
 	req := savedRequest{
-		Kind:     t.kind,
-		Method:   t.method,
-		URL:      t.url,
-		Params:   rowsToSaved(t.params.Rows),
-		Headers:  rowsToSaved(t.headers.Rows),
-		BodyType: t.bodyType,
-		Protocol: t.protocol,
+		Kind:       t.kind,
+		Method:     t.method,
+		URL:        t.url,
+		Params:     paramsToSaved(t.params.Rows),
+		PathParams: paramsToSaved(t.pathParams.Rows),
+		Headers:    rowsToSaved(t.headers.Rows),
+		BodyType:   t.bodyType,
+		Protocol:   t.protocol,
 	}
 	// A file keeps what its format edits: the text of a code body, the rows of
 	// an encoded one.
@@ -1081,19 +1119,21 @@ func (a *app) applySettings() {
 		a.language = s.Language
 	}
 	a.maxResponseMB = float64(responseLimitMB(s.MaxResponseMB))
+	a.timeoutSeconds = float64(requestTimeoutSeconds(s.TimeoutSeconds))
 	a.autoUpdate = s.AutoUpdate
 	a.applied = design.Mode(-1) // the theme is built again with them
 }
 
-// rememberSettings keeps the appearance, accent, language, response limit and
-// update choice for the next run.
+// rememberSettings keeps the appearance, accent, language, response limit,
+// request timeout and update choice for the next run.
 func (a *app) rememberSettings() error {
 	a.store.Settings = settings{
-		Mode:          a.mode.Key(),
-		Accent:        a.accent,
-		Language:      a.language,
-		MaxResponseMB: int(math.Round(a.maxResponseMB)),
-		AutoUpdate:    a.autoUpdate,
+		Mode:           a.mode.Key(),
+		Accent:         a.accent,
+		Language:       a.language,
+		MaxResponseMB:  int(math.Round(a.maxResponseMB)),
+		TimeoutSeconds: int(math.Round(a.timeoutSeconds)),
+		AutoUpdate:     a.autoUpdate,
 	}
 	return a.store.SaveSettings()
 }
@@ -1110,6 +1150,21 @@ func responseLimitMB(mb int) int {
 		return defaultResponseLimitMB
 	}
 	return min(mb, maxResponseLimitMB)
+}
+
+// requestTimeout is how long a request is waited for: the seconds the settings
+// hold, the default when they hold none.
+func (a *app) requestTimeout() time.Duration {
+	return time.Duration(a.timeoutSeconds * float64(time.Second))
+}
+
+// requestTimeoutSeconds is a request timeout in seconds, the default when it is
+// not a number the settings can hold.
+func requestTimeoutSeconds(seconds int) int {
+	if seconds < minTimeoutSeconds {
+		return defaultTimeoutSeconds
+	}
+	return min(seconds, maxTimeoutSeconds)
 }
 
 // palette returns the colors of this frame.
@@ -1157,12 +1212,18 @@ func (a *app) send(c *ui.Context) {
 	}
 	vars := a.store.VarsFor(a.active)
 	url, missing := a.targetURL(t)
-	params, missingParams := req.ResolveRows(t.params.Enabled(), vars)
+	pathValues, missingValues := a.pathValues(t, vars)
+	url, unfilled := req.FillPath(url, pathValues)
+	if len(unfilled) > 0 {
+		c.Toast("路径参数未填：" + strings.Join(unfilled, "、"))
+		return
+	}
+	params, missingParams := req.ResolveRows(paramRows(t.params.Enabled()), vars)
 	headers, missingHeaders := req.ResolveRows(t.headers.Enabled(), vars)
 	form, missingForm := req.ResolveRows(t.form.Enabled(), vars)
 	body, missingBody := req.ResolveVars(t.body.String(), vars)
-	missing = req.Dedupe(append(append(append(append(missing, missingParams...),
-		missingHeaders...), missingForm...), missingBody...))
+	missing = req.Dedupe(append(append(append(append(append(missing, missingValues...),
+		missingParams...), missingHeaders...), missingForm...), missingBody...))
 	if len(missing) > 0 {
 		c.Toast(missingText(missing))
 		return
@@ -1182,8 +1243,11 @@ func (a *app) send(c *ui.Context) {
 	}
 	t.loading, t.resp = true, nil
 	t.sentHeaders = built.Header.Clone()
+	t.sentURL = url
 	limit := a.responseLimit()
-	ctx, cancel := context.WithCancel(context.Background())
+	// The settings say how long a request is waited for: a server that never
+	// answers gives its tab back when the deadline passes.
+	ctx, cancel := context.WithTimeout(context.Background(), a.requestTimeout())
 	t.cancel = cancel
 	if a.after == nil {
 		// No window to hand the work to: the test runs it here.
@@ -1314,6 +1378,44 @@ func isJSON(contentType, body string) bool {
 		return false
 	}
 	return json.Valid([]byte(body))
+}
+
+// paramsFromSaved turns stored parameters into the rows a parameters table
+// edits, with what each is for.
+func paramsFromSaved(rows []savedRow) []widgets.Param {
+	out := make([]widgets.Param, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, widgets.Param{
+			Enabled: r.Enabled, Key: r.Key, Value: r.Value,
+			Description: r.Description,
+		})
+	}
+	return out
+}
+
+// paramsToSaved turns edited parameters into stored ones, leaving out the
+// empty rows that only give room to type.
+func paramsToSaved(rows []widgets.Param) []savedRow {
+	out := make([]savedRow, 0, len(rows))
+	for _, r := range rows {
+		if r.Key == "" && r.Value == "" {
+			continue
+		}
+		out = append(out, savedRow{
+			Enabled: r.Enabled, Key: r.Key, Value: r.Value,
+			Description: r.Description,
+		})
+	}
+	return out
+}
+
+// paramRows turns parameters into the key/value rows a request is built from.
+func paramRows(rows []widgets.Param) []widgets.Row {
+	out := make([]widgets.Row, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, widgets.Row{Enabled: r.Enabled, Key: r.Key, Value: r.Value})
+	}
+	return out
 }
 
 // rowsFromSaved turns stored rows into the rows a key/value list edits,

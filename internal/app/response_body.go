@@ -68,7 +68,9 @@ func mediaType(contentType string) string {
 }
 
 // downloadName is the file a response saves as: the name the server suggests,
-// else the last part of the address, else a name from the media type.
+// else the last part of the address, else a name from the media type. The
+// address is the one the request went out to, its path filled in, so a file is
+// never named after a {placeholder}.
 func downloadName(res *response, address string) string {
 	if said := suggestedName(res.Headers.Get("Content-Disposition")); said != "" {
 		return safeDownloadName(said)
@@ -125,4 +127,14 @@ func safeDownloadName(name string) string {
 		return "response"
 	}
 	return name
+}
+
+// sentAddress is the address the last request went out to, its variables, its
+// baseurl and its path filled in. A tab that has not sent anything reads its own
+// address: the response pane names a file after whichever it has.
+func (t *tab) sentAddress() string {
+	if t.sentURL != "" {
+		return t.sentURL
+	}
+	return t.url
 }

@@ -26,6 +26,10 @@ type Row struct {
 
 func (r Row) filled() bool { return r.Key != "" || r.Value != "" || r.File != "" }
 
+// The size a picture of an uploaded file draws at, beside its name: a square as
+// tall as the cell, filled by the picture and cropped to it.
+const fileThumbSize float32 = 28
+
 // State holds the rows of a key/value list, kept by the app as its other
 // state. View edits it; the list keeps an empty row at the end so that
 // typing starts a new one, as Hoppscotch's does. OnChange runs when a row is
@@ -42,6 +46,9 @@ type State struct {
 	// no longer holds, so the app deletes it.
 	ChooseFile  func() (path, name string, err error)
 	FileDropped func(path string)
+	// Thumbnail, when set, is the small picture a row's file holds: an image is
+	// shown beside its name, and a file that is not one reads as its name alone.
+	Thumbnail func(path string) *ui.Bitmap
 
 	add    bool
 	remove int // one more than the row to remove; 0 removes none
@@ -150,6 +157,16 @@ func (s *State) fileCell(c *ui.Context, p design.Palette, i int, r *Row) bool {
 				ui.Text(c, r.FileName).FontSize(design.FontSizeBody).
 					TextColor(p.TextSecondary).SingleLine()
 			})
+			// An uploaded picture shows what it holds beside its name, cropped to
+			// the square it draws in: a file the app cannot read as a picture
+			// keeps the name alone.
+			if s.Thumbnail != nil {
+				if picture := s.Thumbnail(r.File); picture != nil {
+					ui.Image(c, picture).Size(fileThumbSize, fileThumbSize).
+						Fit(ui.Cover).Radius(design.Radius).Shrink(0).
+						Label(fmt.Sprintf("图片预览第 %d 行", i+1))
+				}
+			}
 			// Clearing the file puts the row back to text, and deletes the file.
 			if ui.ButtonBase(c).Width(18).Height(18).Label(fmt.Sprintf("清除文件第 %d 行", i+1)).
 				Cursor(ui.CursorPointer).Children(func() {

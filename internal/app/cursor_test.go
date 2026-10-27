@@ -38,7 +38,7 @@ func TestWorkspaceControlsShowPointer(t *testing.T) {
 	tt := ui.NewTester(a.view, 1280, 800)
 
 	wantPointer(t, tt, "发送", "请求方法", "标签页 Pets", "关闭标签页 Pets",
-		"新建标签页", "启用第 1 行", "文件夹 根目录", "在根目录里新建接口",
+		"新建标签页", "启用参数第 1 行", "添加参数", "文件夹 根目录", "在根目录里新建接口",
 		"筛选类型")
 
 	// The body panel and its wand are built only once their tab is chosen.

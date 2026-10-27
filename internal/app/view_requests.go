@@ -214,7 +214,10 @@ func (a *app) requestLineRow(c *ui.Context, p design.Palette, col collection, re
 			// A REST request names its method before its name; any other keeps
 			// the icon of its kind alone, as its tab does.
 			a.kindBadge(c, p, req)
-			ui.Text(c, req.Name).FontSize(design.FontSizeBody).TextColor(name).SingleLine()
+			// The name is what a narrow row shortens: it ellipsizes rather than
+			// pushing the method out of view.
+			ui.Text(c, req.Name).FontSize(design.FontSizeBody).TextColor(name).
+				SingleLine().MinWidth(0)
 		})
 		if body.Clicked() {
 			a.openRequest(col.ID, req)
@@ -242,12 +245,16 @@ func (a *app) requestLineRow(c *ui.Context, p design.Palette, col collection, re
 // REST request, or the icon of the kind of any other.
 func (a *app) kindBadge(c *ui.Context, p design.Palette, req savedRequest) {
 	if req.Kind != kindREST {
-		ui.Icon(c, kindIcon(req.Kind)).FontSize(13).TextColor(p.TextMuted)
+		ui.Icon(c, kindIcon(req.Kind)).FontSize(13).TextColor(p.TextMuted).Shrink(0)
 		return
 	}
-	ui.Icon(c, kindIcon(req.Kind)).FontSize(11).TextColor(p.Method(req.Method))
-	ui.Text(c, req.Method).Bold().FontSize(design.FontSizeTiny).
-		TextColor(p.Method(req.Method)).SingleLine()
+	color := p.Method(req.Method)
+	ui.Icon(c, kindIcon(req.Kind)).FontSize(11).TextColor(color).Shrink(0)
+	// The method keeps the width it draws at, in a tree as narrow as it gets: the
+	// name beside it gives way instead, so a row never reads 「… 请求…」.
+	ui.Text(c, req.Method).Bold().FontSize(design.FontSizeTiny).TextColor(color).
+		SingleLine().Shrink(0).
+		MinWidth(measureText(c, req.Method, design.FontSizeTiny, 700) + tabWiggle)
 }
 
 // moreButton is the "⋮" a row of the tree opens its menu with, standing on its

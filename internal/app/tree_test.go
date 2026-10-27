@@ -612,7 +612,7 @@ func TestCollectionOpensOnAStartHint(t *testing.T) {
 	if !tt.HasText("还没有打开接口") || !tt.HasText("新建接口") || !tt.HasText("Ctrl") {
 		t.Fatalf("texts %q, want the start hint of a collection", tt.Texts())
 	}
-	if tt.HasText("键第 1 行") {
+	if tt.HasText("参数名第 1 行") {
 		t.Error("the request panel shows behind the start hint")
 	}
 	if tt.HasText("新建标签页") || tt.HasText("环境：选择环境") {
@@ -624,7 +624,7 @@ func TestCollectionOpensOnAStartHint(t *testing.T) {
 	if tt.HasText("还没有打开接口") {
 		t.Errorf("texts %q, want the hint gone once an interface is open", tt.Texts())
 	}
-	if !tt.HasText("键第 1 行") {
+	if !tt.HasText("参数名第 1 行") {
 		t.Error("the request panel is missing after opening an interface")
 	}
 	if !tt.HasText("新建标签页") {
@@ -841,5 +841,27 @@ func TestStartHintLinesUpItsActions(t *testing.T) {
 	}
 	if tip.X <= first.X {
 		t.Errorf("the tips start at %.1f, want them beside the labels at %.1f", tip.X, first.X)
+	}
+}
+
+// TestTreeKeepsTheMethodOfANarrowRow checks a long name in the narrow tree gives
+// way to the method: the method reads whole, never as an ellipsis.
+func TestTreeKeepsTheMethodOfANarrowRow(t *testing.T) {
+	a := testApp(t)
+	col := a.store.Collection("Demo")
+	name := strings.Repeat("请求网络视频2-", 6)
+	if _, err := a.store.AddRequest(col.ID, "", name, savedRequest{Kind: kindREST, Method: "GET"}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadActive()
+	tt := ui.NewTester(a.view, 1280, 800)
+
+	method, ok := tt.Find("GET")
+	if !ok {
+		t.Fatalf("texts %q, want the method of the request in the tree", tt.Texts())
+	}
+	// An ellipsized method draws a hair of a box: the whole of GET draws wider.
+	if method.W < 18 {
+		t.Errorf("method box %v, want it whole rather than shortened", method)
 	}
 }

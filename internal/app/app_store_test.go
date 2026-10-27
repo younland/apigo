@@ -2,6 +2,7 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"apigo/internal/design"
 	"apigo/internal/store"
@@ -47,6 +48,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	a.store = s
 	a.mode, a.accent, a.language = design.Dark, "Blue", "简体中文"
 	a.maxResponseMB = 64
+	a.timeoutSeconds = 90
 	if err := a.rememberSettings(); err != nil {
 		t.Fatal(err)
 	}
@@ -72,5 +74,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if got := restarted.responseLimit(); got != 64<<20 {
 		t.Errorf("response limit %d after a restart, want 64 MB", got)
+	}
+	if got := restarted.requestTimeout(); got != 90*time.Second {
+		t.Errorf("request timeout %v after a restart, want 90s", got)
 	}
 }

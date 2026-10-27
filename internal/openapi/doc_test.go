@@ -77,6 +77,9 @@ func TestParseV3(t *testing.T) {
 	if len(list.Params) != 1 || list.Params[0] != (Row{Key: "limit", Value: "10"}) {
 		t.Errorf("params %+v, want the query parameter with its default", list.Params)
 	}
+	if len(list.Path) != 1 || list.Path[0] != (Row{Key: "id"}) {
+		t.Errorf("path params %+v, want the name the path takes", list.Path)
+	}
 	if len(list.Headers) != 1 || list.Headers[0] != (Row{Key: "X-Trace", Value: "abc"}) {
 		t.Errorf("headers %+v, want the header parameter with its example", list.Headers)
 	}
@@ -139,7 +142,7 @@ func TestParseV2(t *testing.T) {
 		t.Errorf("url %q, want the path under the base path", get.URL)
 	}
 	if len(get.Params) != 1 || get.Params[0] != (Row{Key: "page", Value: "1"}) {
-		t.Errorf("params %+v, want the query parameter", get.Params)
+		t.Errorf("params %+v, want the query parameter of a Swagger document", get.Params)
 	}
 	if post.BodyType != "urlencoded" || len(post.Form) != 1 {
 		t.Fatalf("body %q %+v, want the form of the operation", post.BodyType, post.Form)

@@ -232,3 +232,65 @@ func TestFormFileClearedDeletesIt(t *testing.T) {
 		t.Errorf("file %q: %v, want it deleted with the clear", rel, err)
 	}
 }
+
+// uploadTo keeps a file in a collection as an upload does, and returns the path
+// the interface keeps it at.
+func uploadTo(t *testing.T, a *app, collectionID, name string, data []byte) string {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := a.store.ImportStatic(collectionID, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rel
+}
+
+// TestFormDataShowsAPictureOfAnImage checks a form field holding a picture shows
+// it beside the file's name, and a field holding anything else keeps the name
+// alone.
+func TestFormDataShowsAPictureOfAnImage(t *testing.T) {
+	a := testApp(t)
+	picture := uploadTo(t, a, "Demo", "封面.png", shotPicture())
+	report := uploadTo(t, a, "Demo", "报告.pdf", []byte("%PDF-1.7 a report"))
+
+	t2 := a.current()
+	t2.reqTab = 2
+	t2.bodyType = "form-data"
+	t2.form.Rows = []widgets.Row{
+		{Enabled: true, Key: "封面", File: picture, FileName: "封面.png"},
+		{Enabled: true, Key: "报告", File: report, FileName: "报告.pdf"},
+		{Enabled: true},
+	}
+	tt := ui.NewTester(a.view, 1280, 800)
+
+	if _, ok := tt.Find("图片预览第 1 行"); !ok {
+		t.Errorf("texts %q, want the picture previewed beside its name", tt.Texts())
+	}
+	// A file that is no picture keeps the name it came with, and no preview.
+	if _, ok := tt.Find("图片预览第 2 行"); ok {
+		t.Error("a preview is drawn for a file that is no picture")
+	}
+	if !tt.HasText("报告.pdf") || !tt.HasText("封面.png") {
+		t.Errorf("texts %q, want both files named", tt.Texts())
+	}
+
+	// The preview stands between the file's name and the cross that clears it.
+	name, _ := tt.Find("封面.png")
+	thumb, _ := tt.Find("图片预览第 1 行")
+	clear, _ := tt.Find("清除文件第 1 行")
+	if name.X >= thumb.X || thumb.X >= clear.X {
+		t.Errorf("name at %v, preview at %v, cross at %v; want the preview after the name",
+			name, thumb, clear)
+	}
+	// The picture covers the square it draws in: one shrunk into it would leave
+	// the row showing above and below.
+	for _, y := range []int{int(thumb.Y) + 3, int(thumb.Y+thumb.H) - 4} {
+		r, g, b, _ := tt.Image().RGBAAt(int(thumb.X+thumb.W/2), y).RGBA()
+		if r>>8 > 240 && g>>8 > 240 && b>>8 > 240 {
+			t.Errorf("the preview leaves the row showing at %d, want the picture covering it", y)
+		}
+	}
+}

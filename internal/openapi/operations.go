@@ -38,13 +38,14 @@ func (d *doc) operations() ([]Request, []Folder) {
 // request is the interface one operation stands for: its name, method and URL,
 // the parameters and headers it takes, and the body it sends.
 func (d *doc) request(path, method string, op, at node) Request {
-	params, headers := d.parameters(op, at)
+	params, pathParams, headers := d.parameters(op, at)
 	bodyType, body, form := d.body(op, at)
 	return Request{
 		Name:     operationName(op, method, path),
 		Method:   strings.ToUpper(method),
 		URL:      d.requestURL(path),
 		Params:   params,
+		Path:     pathParams,
 		Headers:  headers,
 		BodyType: bodyType,
 		Body:     body,

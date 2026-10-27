@@ -35,3 +35,7 @@ The native UI rules below apply where the app uses package `ui`; preserve a web 
 - Reproduce UI failures with `ui.NewTester`. Exercise extra frames while elements disappear and return, plus relevant focus, typing, and shortcut behavior.
 - Run targeted regression tests, `go tool mygo vet .` for stored build values and goroutine captures, and `CGO_ENABLED=0 go test ./...`. Use race checks when changing shared state, and inspect rendered output or the native app when changing layout/platform behavior, respecting the user's verification preferences.
 - For upgrades, preview with `go tool mygo migrate-ui .`, apply with `-write`, and review persistent identity/services, separately assigned keys and derived bound values manually. Verify affected API/lifecycle assumptions against the new pinned source and rerun relevant UI tests. Report remaining platform-specific verification limits.
+
+## Project experience
+
+When working in the ApiGo repository, read [references/project-experiences.md](references/project-experiences.md) on demand for project-specific UI, persistence, packaging, and upgrade pitfalls. Add newly verified, recurring lessons there using the existing entry template; keep this skill entry point lightweight.
