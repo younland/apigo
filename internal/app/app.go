@@ -304,13 +304,17 @@ type app struct {
 	thumbs map[string]*ui.Bitmap
 
 	// autoUpdate makes the app look for a newer version at startup, off until
-	// the reader turns it on. checkingUpdate says a check is on its way, and
-	// updateNote what the last one found. checkRelease asks for the newest
-	// release; main leaves it nil for GitHub's, and tests replace it.
-	autoUpdate     bool
-	checkingUpdate bool
-	updateNote     string
-	checkRelease   func(ctx context.Context) (release, error)
+	// the reader turns it on. checkingUpdate and downloadingUpdate guard the
+	// two network jobs. checkRelease and fetchUpdate are replaced by tests.
+	autoUpdate         bool
+	checkingUpdate     bool
+	downloadingUpdate  bool
+	updateNote         string
+	updateToast        string
+	updateDownloaded   int64
+	updateDownloadSize int64
+	checkRelease       func(ctx context.Context) (release, error)
+	fetchUpdate        func(ctx context.Context, rel release, progress updateProgress) (string, error)
 
 	// watched is the collection whose directory a watch follows, and
 	// watchStop ends that watch.
@@ -331,9 +335,10 @@ type app struct {
 	// the work then runs inline.
 	after func(func())
 
-	// opener shows a directory in the desktop's file manager. main fills it
-	// with mygo.Shell.OpenPath; tests replace it.
+	// opener shows a directory or starts a verified installer. main fills it
+	// with mygo.Shell.OpenPath; quit leaves for that installer. Tests replace both.
 	opener func(string) error
+	quit   func()
 
 	// baseDir is the default data directory, where the pointer to the one the
 	// user picked is kept; main fills it, and chooseDir asks the desktop for

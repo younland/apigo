@@ -44,7 +44,9 @@ func TestNewerVersion(t *testing.T) {
 // answer, and that what is not published to update to reads as nothing.
 func TestReleaseAtReadsGitHub(t *testing.T) {
 	body := `{"tag_name":"v0.2.0","html_url":"https://example.com/releases/v0.2.0",
-		"body":"- 修复若干问题","draft":false,"prerelease":false}`
+		"body":"- 修复若干问题","draft":false,"prerelease":false,
+		"assets":[{"name":"apigo-0.2.0-windows-amd64-setup.exe",
+		"browser_download_url":"https://example.com/setup.exe","digest":"sha256:abc"}]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("User-Agent"); got == "" {
 			t.Error("the request names no user agent, want one GitHub accepts")
@@ -59,6 +61,9 @@ func TestReleaseAtReadsGitHub(t *testing.T) {
 	}
 	if rel.Version != "0.2.0" || rel.URL != "https://example.com/releases/v0.2.0" {
 		t.Errorf("release %+v, want 0.2.0 of the page GitHub names", rel)
+	}
+	if len(rel.Assets) != 1 || rel.Assets[0].URL != "https://example.com/setup.exe" || rel.Assets[0].Digest != "sha256:abc" {
+		t.Errorf("assets %+v, want the installer URL and digest from GitHub", rel.Assets)
 	}
 
 	// A draft, a prerelease and a namespace with no release have nothing to

@@ -18,9 +18,9 @@ func (a *app) checkUpdatesAtStart() {
 }
 
 // checkUpdates asks for the newest release of the app and says what it found.
-// With ask, a newer version offers the page it is published on.
+// With ask, a newer version offers to download its verified installer.
 func (a *app) checkUpdates(ask bool) {
-	if a.checkingUpdate {
+	if a.checkingUpdate || a.downloadingUpdate {
 		return
 	}
 	check := a.checkRelease
@@ -44,8 +44,7 @@ func (a *app) checkUpdates(ask bool) {
 	}()
 }
 
-// noteUpdate says what a check found, and asks before the browser opens the
-// page of a newer version.
+// noteUpdate says what a check found, and asks before downloading an update.
 func (a *app) noteUpdate(rel release, err error, ask bool) {
 	switch {
 	case err != nil:
@@ -59,12 +58,10 @@ func (a *app) noteUpdate(rel release, err error, ask bool) {
 		}
 		a.ask(confirm{
 			title:  "发现新版本 " + rel.Version,
-			body:   "当前版本 " + currentVersion() + "，新版本已发布。是否打开下载页？",
-			action: "打开下载页",
+			body:   "当前版本 " + currentVersion() + "，新版本已发布。将自动下载并校验更新包，然后启动安装程序。",
+			action: "下载并更新",
 			run: func(c *ui.Context) {
-				if rel.URL != "" {
-					c.OpenURL(rel.URL)
-				}
+				a.startUpdateDownload(rel)
 			},
 		})
 	}

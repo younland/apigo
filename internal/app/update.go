@@ -10,11 +10,19 @@ import (
 	"time"
 )
 
+// releaseAsset is one install package published with a release.
+type releaseAsset struct {
+	Name   string
+	URL    string
+	Digest string
+}
+
 // release is a version of the app published for download.
 type release struct {
 	Version string
 	URL     string
 	Notes   string
+	Assets  []releaseAsset
 }
 
 // releaseRepo is the repository the app's releases are published in.
@@ -62,6 +70,11 @@ func releaseAt(ctx context.Context, url string) (release, error) {
 		Notes      string `json:"body"`
 		Draft      bool   `json:"draft"`
 		Prerelease bool   `json:"prerelease"`
+		Assets     []struct {
+			Name   string `json:"name"`
+			URL    string `json:"browser_download_url"`
+			Digest string `json:"digest"`
+		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return release{}, err
@@ -69,10 +82,15 @@ func releaseAt(ctx context.Context, url string) (release, error) {
 	if body.Draft || body.Prerelease || body.Tag == "" {
 		return release{}, nil // nothing published to update to
 	}
+	assets := make([]releaseAsset, 0, len(body.Assets))
+	for _, asset := range body.Assets {
+		assets = append(assets, releaseAsset{Name: asset.Name, URL: asset.URL, Digest: asset.Digest})
+	}
 	return release{
 		Version: strings.TrimPrefix(strings.TrimSpace(body.Tag), "v"),
 		URL:     body.URL,
 		Notes:   body.Notes,
+		Assets:  assets,
 	}, nil
 }
 

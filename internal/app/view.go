@@ -18,6 +18,10 @@ func (a *app) view(c *ui.Context) {
 		c.Toast(a.saveErr)
 		a.saveErr = ""
 	}
+	if a.updateToast != "" {
+		c.Toast(a.updateToast)
+		a.updateToast = ""
+	}
 	// The tree follows the files another program changes in the open
 	// collection's directory.
 	a.followFiles()

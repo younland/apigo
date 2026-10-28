@@ -397,12 +397,12 @@
   - **验证方式**：`TestStartHintLinesUpItsActions`（四行标签 X 相同、行距 ≥ 20、第一行与第二行的说明以及第三行的按键 X 都相同——把标签的 `MinWidth` 去掉时立刻报「tips and keys start at 777.0 and 751.0」）。
   - **适用范围**：`internal/app/view_start.go`（`startHint`/`hintList`/`hintRow`/`keycap`）；任何「标签 + 值/按键」的两列表格式排版。
 
-- **标题**：联网检查新版本要「默认关、可注入、结果如实说」——别用 mygo 自带 Updater（需要签名 feed）
-  - **触发信号**：想做自动更新，发现 `mygo.Updater` 只在 `mygo.config.ts` 配了签名 feed 的构建里可用（`ErrUpdatesDisabled`），而本项目的 Release 只是 GitHub 上的普通产物。
-  - **根因/约束**：签名 update feed 需要额外密钥与 `mygo build` 配置；`Updater.Check` 在开发构建/未配置构建里直接报错。要「够用的自动更新」只需要查 GitHub 最新 Release 并让用户去下载页。
-  - **正确做法**：`internal/app/update.go` 用 GitHub API（`/releases/latest`，带 `User-Agent`，15s 超时）读 `tag_name/html_url/body`，跳过 `draft`/`prerelease`；版本比较自己写 `newerVersion`（按点分数字逐段比，支持前缀 `v`，非数字后缀截断，空版本当 `0.0.0`，读不出来的版本永不算新）。`update_check.go` 里 `checkUpdates(ask)`：`a.checkRelease` 可注入（测试用假函数），`a.after == nil`（测试）时同步跑，否则 goroutine 里查、`a.after` 回窗口线程写 `a.updateNote`；发现新版本用 `a.ask(confirm{... c.OpenURL(url)})` 问一句再开浏览器。**`autoUpdate` 默认 false**（`settings.AutoUpdate` + 设置「通用 → 更新」复选框），只在 `run.go` 的 `checkUpdatesAtStart` 里按开关决定要不要联网。
-  - **验证方式**：`TestNewerVersion`（0.2.0>0.1.0、1.10.0>1.9.9、`nightly` 不算新）、`TestReleaseAtReadsGitHub`（httptest 验 User-Agent、草稿/预发布/无 tag 视为无更新、403 报错）、`TestAutoUpdateIsOffUntilTurnedOn`（默认关→勾选落盘→点「检查更新」出现「有新版本 0.2.0」与确认框→最新/失败两种结果的措辞）、`TestStartupCheckRunsOnlyWhenEnabled`（开关关时一次网络都不发）。
-  - **适用范围**：`internal/app/update.go`、`update_check.go`、`internal/store/service_settings.go`、`internal/app/view_env.go`（`autoUpdateField`）、`internal/app/run.go`。
+- **标题**：自动下载更新要「按平台选资产 + 校验摘要 + 后台下载 + 可注入安装」——别直接用浏览器代替安装，也别强接需要签名 feed 的 Updater
+  - **触发信号**：发现新版本后只打开 Release 网页，用户还要自己找安装包；或考虑 `mygo.Updater`，但项目没有签名 update feed。
+  - **根因/约束**：`mygo.Updater` 只在构建配置与密钥齐全时可用；本项目 Release 已有各平台安装包与 GitHub API 的 `digest`，可以在不引入 feed 的情况下完成下载更新。安装包不能未校验就执行，下载也不能卡住窗口线程。
+  - **正确做法**：`update.go` 解析 Release 的 `assets`；`update_download.go` 按版本与 GOOS/GOARCH 精确选择 Windows setup exe、macOS universal DMG、Linux deb，要求 HTTPS 与 SHA-256，限制 512 MB/15 分钟，先写 `.download` 临时文件、校验后 rename，失败清理。`update_install.go` 在 goroutine 下载，进度经 `Window.Update` 回窗口线程；`fetchUpdate`/`opener`/`quit` 都可注入，生产用 `Shell.OpenPath` 启动安装器并退出。启动前写回所有已落盘标签，保存失败、下载失败、校验失败都不启动安装。**自动检查仍默认关闭**，发现新版本后由用户点「下载并更新」。
+  - **验证方式**：`TestReleaseAssetForPlatforms`、`TestReleaseAssetRejectsMissingOrUnsafeMetadata`、`TestReleaseDownloadVerifiesSHA256`、`TestReleaseDownloadRejectsBadChecksum`（httptest TLS 真下载）、`TestUpdateDownloadsAndStartsInstaller`、`TestUpdateDownloadFailureDoesNotInstall`、`TestUpdateDoesNotInstallAfterASaveFailure`、`TestUpdateDownloadCannotStartTwice`；原版本比较、启动开关与 Release 解析用例继续通过。
+  - **适用范围**：`internal/app/update.go`、`update_download.go`、`update_install.go`、`update_check.go`、`internal/app/view_env.go`、`internal/app/run.go`。
 
 - **标题**：显示名与磁盘名分开：界面叫 `ApiGo`，落盘仍是 `apigo`
   - **触发信号**：用户要把项目名从 apigo 改成 ApiGo，但一改 `mygo.json` 的 `name` 就会连带换掉可执行文件名**和**数据目录（`App.Name()` 决定 `%APPDATA%/<name>`），已有集合会像凭空消失。

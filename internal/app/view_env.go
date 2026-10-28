@@ -387,14 +387,17 @@ func (a *app) autoUpdateField(c *ui.Context, p design.Palette) {
 	if check.Changed() {
 		a.saveSettingsOrToast(c)
 	}
-	ui.Text(c, "启动时检查新版本；不开启时只在点「检查更新」时联网").
+	ui.Text(c, "启动时检查新版本；确认后自动下载、校验并启动安装程序").
 		FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
 	ui.Row(c).Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
 		label := "检查更新"
 		if a.checkingUpdate {
 			label = "检查中…"
 		}
-		btn := ui.Button(c, label).Cursor(ui.CursorPointer).Disabled(a.checkingUpdate)
+		if a.downloadingUpdate {
+			label = "下载中…"
+		}
+		btn := ui.Button(c, label).Cursor(ui.CursorPointer).Disabled(a.checkingUpdate || a.downloadingUpdate)
 		if btn.Clicked() {
 			a.checkUpdates(true)
 		}

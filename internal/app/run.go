@@ -46,6 +46,7 @@ func Run() {
 		// A collection's folder opens in the desktop's file manager, and the
 		// settings ask it for another data directory.
 		a.opener = mygo.Shell.OpenPath
+		a.quit = mygo.App.Quit
 		a.chooseDir = chooseDirectory
 		a.chooseFile = chooseUpload
 		a.chooseDoc = chooseDocument
