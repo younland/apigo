@@ -6,7 +6,7 @@ version: '3'
 #   task build     裸可执行文件到 bin/（版本注入，无安装包）
 #   task package   生产打包 Windows（exe + NSIS 安装包，输出 build/windows-amd64/）
 #
-# 版本号唯一来源是 APP_VERSION（默认 0.1.1）；改版本号用
+# 版本号唯一来源是 APP_VERSION（默认 0.1.2）；改版本号用
 #   task sync:version APP_VERSION=1.2.3
 # 它写进 mygo.json —— mygo dev/build 的运行时版本（mygo.App.Version()）、
 # 打包元数据与安装包文件名都读它。CI 打 tag 时用 APP_VERSION=<去掉 v 的 tag> 覆盖。
@@ -15,7 +15,7 @@ version: '3'
 
 vars:
   APP_NAME: apigo
-  APP_VERSION: '{{.APP_VERSION | default "0.1.1"}}'
+  APP_VERSION: '{{.APP_VERSION | default "0.1.2"}}'
   BIN_DIR: bin
   DIST_DIR: dist
   EXE: '{{if eq OS "windows"}}.exe{{end}}'
