@@ -8,8 +8,8 @@
   - **触发信号**：把 40 多个根目录文件搬进 `internal/` 时，几百处类型/方法引用要跟着改名；手工扫一遍几乎必然漏。
   - **根因/约束**：Go 的 `main` 包不能被 import，功能要下沉就得成包；跨包就只能用导出的名字，而 `folder`/`collection`/`response` 这类名字在 app 里遍地都是。类型别名（`type folder = store.Folder`）能让 app 侧的 `folder{...}`、`e.Folder` 一行都不用改，被挡住的只有「未导出方法/字段」和「包级函数」。
   - **正确做法**：分批下沉，每批结束都要 `go build ./...` 绿：①`widgets` 直接搬；②`internal/store`（13 个 `service_*.go`）——包内用「整词重命名」把类型/方法导出，app 侧加 `store_alias.go` 别名 + 只改 `a.store.X` 这类方法调用；③`internal/req`（`http.go`/`formats.go`/`vars.go`）+ `req_alias.go`；④其余全进 `internal/app`，根目录只留 `main.go`（`package main` 里 `app.Run()`）。`//go:embed` 不能跨目录，字体单独成 `internal/assets`（`assets` 由 `run.go` 空导入触发 `init()` 注册）。测试按被测包落位：纯 store 的进 `internal/store`，req 的进 `internal/req`，视图测试留 `internal/app`。
-  - **验证方式**：`task check` 绿（`mygo vet` 改成 `./...`，否则只看根包）；`APIGO_SHOTS=... go test -run TestShots ./internal/app/` 与重构前的图逐张 `cmp`，应**逐字节一致**（纯搬家不改行为）；字体没注册会立刻体现在截图的字形上。
-  - **适用范围**：`internal/**`、根 `main.go`、`Taskfile.yml`（`mygo vet ./...`）、`README.md` 目录结构、`AGENTS.md` 的经验条目路径。
+  - **验证方式**：`task check` 绿（`mygo vet .` 会在应用目录内递归检查全部包）；`APIGO_SHOTS=... go test -run TestShots ./internal/app/` 与重构前的图逐张 `cmp`，应**逐字节一致**（纯搬家不改行为）；字体没注册会立刻体现在截图的字形上。
+  - **适用范围**：`internal/**`、根 `main.go`、`Taskfile.yml`（`mygo vet .`，它会在应用目录内递归检查全部包）、`README.md` 目录结构、`AGENTS.md` 的经验条目路径。
 
 - **标题**：`ui.Row` 默认把子元素垂直居中，内容不足满高时会被"居中"到窗口中部
   - **触发信号**：窗口上部大片空白、内容出现在视觉中心（内容少的窗口最明显）。
