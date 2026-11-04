@@ -58,7 +58,7 @@ func textWidth(c *ui.Context, s string) float32 {
 
 // measureText is how wide s draws in the interface font, at a size and weight.
 func measureText(c *ui.Context, s string, size float32, weight int) float32 {
-	w, _ := c.MeasureText(0, ui.Span{Text: s, Font: design.FontFamily, Size: size, Weight: weight})
+	w, _ := c.MeasureText(0, ui.Span{Text: s, Font: c.Theme().Font, Size: size, Weight: weight})
 	return w
 }
 

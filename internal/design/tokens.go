@@ -30,8 +30,7 @@ const (
 )
 
 // Type sizes, in DIPs. Hoppscotch sets body text at 12px on a 16px line; the
-// app draws one step up: the embedded font has thinner ink than the system's at
-// the same size, which read too light at 12.
+// app draws one step up for readability.
 const (
 	FontSizeBody    float32 = 13
 	FontSizeTiny    float32 = 11
@@ -43,7 +42,7 @@ const (
 // FontFamily is the family the app draws with: the embedded interface font
 // main.go registers at startup, and the system's own where it cannot be
 // added.
-const FontFamily = "HarmonyOS Sans SC"
+const FontFamily = "Inter Variable"
 
 // Palette is one appearance of the app.
 type Palette struct {

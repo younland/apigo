@@ -65,6 +65,7 @@ func TestMenuItemsShowPointer(t *testing.T) {
 	if err := tt.Click("设置"); err != nil {
 		t.Fatal(err)
 	}
+	scrollSettingsToBottom(tt)
 	wantPointer(t, tt, "关闭设置", "更换目录", "强调色 Green", "跟随系统")
 	if err := tt.Click("关闭设置"); err != nil {
 		t.Fatal(err)

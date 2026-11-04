@@ -10,10 +10,10 @@ import (
 )
 
 // interfaceFont is the font the app draws with, embedded rather than
-// installed: every platform shows the same shapes, Chinese included, and a
-// collection's text looks as it does on its author's machine.
+// installed: every platform shows the same Latin shapes, with glyphs the font
+// does not cover falling back to the system's fonts.
 //
-//go:embed HarmonyOS_Sans_SC.ttf
+//go:embed InterVariable.ttf
 var interfaceFont []byte
 
 // fontReady reports whether the embedded font could be added to the text

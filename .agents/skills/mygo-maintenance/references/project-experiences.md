@@ -190,18 +190,18 @@
   - **正确做法**：像用户那样操作——`tt.Click("<输入框标签>")` → `tt.Key(ui.Cmd, ui.KeyA)` → `tt.Type("新值")`；断言字段值再点保存。
   - **验证方式**：`TestRenameCollectionThroughMenu`、`TestTabRenameThroughContextMenu`。
   - **适用范围**：所有 `ui.Tester` 视图测试里的 `TextInput`/可编辑字段。
-- **标题**：自定义字体走 `go:embed` + `ui.RegisterFont` + 主题 `Font`，注册失败要退回系统字体
-  - **触发信号**：换了字体后某些文字变成 `PO…`/`Untitl…`；或某平台窗口里字体没变、启动日志报注册失败。
-  - **根因/约束**：`ui.RegisterFont(data, family)` 只把字体加进文本引擎；要全局生效必须写进 `ui.Theme.Font`（`design.Theme` 里 `t.Font = design.FontFamily`），否则只有显式 `.Font(family)` 的元素用它。系统没有可注册字体的文本引擎时（stub 引擎、部分 CI）注册会返回错误。
-  - **正确做法**：字体文件放 `resources/`，`internal/assets/font.go` 里 `//go:embed` 后 `init()` 注册，失败只 `log.Printf` 不退出（主题仍写 family，绘制时回落系统字体）；测试用 `fontReady` 区分"平台不支持"与"嵌入坏了"（`TestInterfaceFontEmbedded` 在 no-font 平台上 `Skip`）。字体变宽会挤掉原本"刚好够"的文字——固定宽度区域要留余量（标签页给了 `design.TabMinWidth`）。
-  - **验证方式**：`TestInterfaceFontEmbedded`（嵌入文件名数字节 + `FontFamilies()` 里为本应用注册）、`TestThemeFollowsPalette`（主题 family）、`APIGO_SHOTS=docs/shots go test -run TestShots ./internal/app/` 出图核对字形与截断。
-  - **适用范围**：`internal/assets/font.go`、`internal/design`（`FontFamily`/`Theme`）、所有固定宽度的文字容器；可执行文件随之增大约字体大小。
-- **标题**：「字体看着偏瘦」先分清是没生效还是字号，别急着换字体文件
-  - **触发信号**：用户说界面字体不是鸿蒙黑体、比样张瘦。样张是 Windows 字体查看器按 12–72 **pt** 绘的，界面是 12 DIP 正文 + 灰字。
-  - **根因/约束**：字体其实生效了——主题 `Font` 生效的证据是「同一段文字，走主题（不写 `.Font`）与显式 `.Font(design.FontFamily)` 的墨量完全相等，与系统字体不等」（探针：40 px 下 3222 / 3222 / 3470 个暗像素）。同样的字重，可变字体 `wght` 400→700 墨量 1929→2706，说明 DirectWrite 拿的是真实实例、不是合成粗。真正显瘦的是 ①正文只有 12 DIP（Hoppscotch 采样值），1 px 竖笔落在半像素覆盖上变中灰；②MyGo 走 DirectWrite 的灰度覆盖（`textureClearType3x1` 三通道取平均），字体查看器是 ClearType 次像素，更「厚」；③大量标签用 `TextSecondary/TextMuted` 灰；④同字号下鸿蒙黑体的墨量比系统 UI 字体少约 7%。
-  - **正确做法**：字号整体上调一档（`design.FontSizeBody` 12→13、`Tiny` 10→11、`Title` 14→15、`Display` 18→19、`LineHeight` 16→17），`SidebarWidth` 240→264 给变宽的树行留位，日志里的只读 code 用 `design.FontSizeBody - 1` 保持「比正文小一号」。全局字重没有主题开关（`ui.Theme` 只有 `Font`/`FontSize`），想整体加粗只能逐处 `.FontWeight`，代价大、别做。
-  - **验证方式**：`TestEnvironmentPickerCentersInTheStrip` 之类尺寸断言全绿；`TestBodyFormatPillsShowTheirLabels` 钉住「胶囊给标签的余量必须严格大于标签的 advance」；截图逐张看窄条是否挤压（页签、日志行尾、树行、格式胶囊）。
-  - **适用范围**：`internal/design/tokens.go`（全部字号与 `SidebarWidth`）、`internal/app/socket.go`（日志 code 字号）、一切写死宽度的行。
+- **标题**：界面字体要「嵌入默认 + 明确回退 + 可选持久化」，主题与测量必须共用字体列表
+  - **触发信号**：要更换默认字体、允许用户选择系统字体，或换字体后出现中文回退不一致、文字被省略。
+  - **根因/约束**：`ui.RegisterFont` 只注册字体，全局生效还要写进 `ui.Theme.Font`；Inter 不覆盖中文，必须显式加 `sans-serif`。只改主题不改测量会按旧字体宽度截断，只改应用状态不处理缓存会让选择不生效。
+  - **正确做法**：`internal/assets` 嵌入 Inter 4.1 与 OFL 许可证；`design.FontWithFallback` 生成 `Inter Variable, sans-serif`，`ThemeWithFont` 接受选择。`app.font` 存基础 family，主题缓存同时按外观/强调色/字体失效，`MeasureText` 使用 `c.Theme().Font`。设置「界面字体」用 `ui.FontFamilies()` 过滤等宽字体，下拉内有界 `ui.Scroll`，选择写入 `settings.yaml` 的 `font`；空值回退 Inter。URL/JSON 仍用 `monospace`。
+  - **验证方式**：`TestInterfaceFontEmbedded`、`TestThemeWithFontUsesTheChoiceAndFallback`、`TestInterfaceFontDefaultsToInterWithSansFallback`、`TestInterfaceFontPickerAppliesAndRemembersChoice`、`TestSettingsRoundTrip`；`APIGO_SHOTS` 出图核对中文、下拉滚动/选中态与窄标签。
+  - **适用范围**：`internal/assets`、`internal/design/{font,theme,tokens}.go`、`internal/app/view_font.go`、`internal/store/service_settings.go`、所有文字测量。
+- **标题**：字体观感先区分注册、字形回退、字号与光栅化，别只凭字体查看器判断
+  - **触发信号**：更换界面字体后觉得文字偏瘦、中文风格不同，或怀疑 `Inter Variable` 没生效。
+  - **根因/约束**：Inter 不覆盖中文，中文由 `sans-serif` 回退；MyGo 在 Windows 上走 DirectWrite 灰度覆盖，和字体查看器的 ClearType 次像素渲染观感不同，大量辅助文字还使用灰色。字体是否生效要看注册与实际绘制，不能只看名字或单一样张。
+  - **正确做法**：先用 `TestInterfaceFontEmbedded` 和主题 family 验证注册，再用实际界面截图检查拉丁字形与中文回退。保持当前字号（正文 13 / tiny 11 / title 15 / display 19 / 行高 17），需要调整时按布局测试逐项改，不做全局加粗。
+  - **验证方式**：`TestEnvironmentPickerCentersInTheStrip`、`TestBodyFormatPillsShowTheirLabels` 等尺寸断言全绿；截图逐张看中文、页签、日志行尾、树行与格式胶囊。颜色像素断言要考虑抗锯齿，不能只接受完全相等的 RGB（`TestOpenTabHighlightsItsRow` 使用容差）。
+  - **适用范围**：`internal/assets`、`internal/design/tokens.go`、一切写死宽度的行与颜色像素断言。
 - **标题**：`c.MeasureText` 只在帧内有效，帧外返回 0——拿它写断言会「静默通过」
   - **触发信号**：测试里 `measureText(ctx, ...)` 得到 0，`rect.W < want` 永远不成立，bug 在场而测试全绿。
   - **根因/约束**：`*ui.Context` 只在 `view(c)` 那一帧里带着排版状态；`tt.Frame()` 之后再调 `c.MeasureText` 没有可量的引擎，返回 (0, 0)。
@@ -240,7 +240,7 @@
   - **适用范围**：`internal/app/view_topbar.go`（`tabName`/`textWidth`/`collectionTab`）、`internal/app/view_tabs.go`（`tabContent` 用同一对函数与 `design.RequestTabMaxWidth`）、`internal/app/view_home.go`（`homeView` 的两列比例）、`internal/design`（`CollectionTabMaxWidth`/`RequestTabMaxWidth`）；以后任何「最大宽度」需求先想清楚是「占比例」还是「单元素封顶」。
 - **标题**：换成嵌入字体后，按钮里的文字会被「内在宽度」算短：标签会缩到 MinWidth，方法被写成「PO…」；要的是 `MinWidth(测得所需宽度)`，不是 `Width()`
   - **触发信号**：请求标签里 `POST` 显示成「PO-…」而 `GET` 正常；标签宽度正好等于 `design.TabMinWidth`；换 `.Width(所需宽度)` 后文字正常了，但标签右端的 × 点不动（标签关不掉、接口文件也没写回）。
-  - **根因/约束**：主题字体换成 `HarmonyOS Sans SC` 后，MyGo 对文本的 max-content 测量比实际绘制偏小，于是 `ButtonBase` 的内在宽度小于内容需要 → 收缩到 `MinWidth`，固定宽/自然宽的子元素先在有限空间里分配，最先让位的正是方法文字。改设 `.Width()` 能让内容排开，但 body 的宽度不再参与父 `Row` 的内在计算，右边的 × 被排到 tab 盒子之外，点击落不到它身上（`Clicked()` 永假）。
+  - **根因/约束**：更换主题字体后，MyGo 对文本的 max-content 测量可能比实际绘制偏小，于是 `ButtonBase` 的内在宽度小于内容需要 → 收缩到 `MinWidth`，固定宽/自然宽的子元素先在有限空间里分配，最先让位的正是方法文字。改设 `.Width()` 能让内容排开，但 body 的宽度不再参与父 `Row` 的内在计算，右边的 × 被排到 tab 盒子之外，点击落不到它身上（`Clicked()` 永假）。
   - **正确做法**：`internal/app/view_tabs.go` 里按测量值算 `chrome`（内边距、方法、间隙、未保存点、×），标题用 `tabName(c, title, RequestTabMaxWidth-chrome-2)` 截断，body 用 `.MinWidth(max(TabMinWidth, chrome+textWidth(label)+2))`，标题文本再单独 `.MinWidth(textWidth+2)` 防「刚好填满被吞」；`textWidth` 固定按正文字号测，`measureText(c, s, size, weight)` 用来测方法（10px/700）。
   - **验证方式**：`internal/app/tabs_test.go` 的 `TestRequestTabCapsItsWidth`（长标题标签 ≤ `design.RequestTabMaxWidth` 且文本以 `…` 结尾）、`TestRequestTabStripHidesItsBar`、`TestEnvironmentPickerHasNoEye`；改回 `.Width()` 时 `internal/app/main_test.go` 的 `TestCloseTabWritesInterfaceFile` 立刻失败（× 点不到、文件没写回）。
   - **适用范围**：`internal/app/view_tabs.go`（`tabContent`/`requestTabChrome`/`tabWiggle`）、`internal/app/view_topbar.go`（`textWidth`/`measureText`）；任何「按钮里放文字 + 右侧还有兄弟按钮」的标签类控件。测试里编辑完标签内容后先 `tt.Frame()` 再点标签上的按钮——未保存点会让标签变宽，旧坐标会点偏。
@@ -363,7 +363,7 @@
 - **标题**：WebSocket 面板：连接与读循环各有归宿，日志只存窗口线程上的数据
   - **触发信号**：连上后收不到消息；关标签后 goroutine 还在跑；断线后日志里再也没有新行；切换标签时旧连接的消息混进新标签。
   - **根因/约束**：gorilla 的读是阻塞的，必须有一条 goroutine 专门读；写不能并发（多个 goroutine 同时 `WriteMessage` 会 panic），要串行化；`ui` 的元素与状态只能碰窗口线程；`a.after` 是「把函数放到窗口线程跑」，测试里为 nil 时是就地跑。
-  - **正确做法**：`internal/ws` 只做协议层——`Dial` 成功后起一条读 goroutine，把 `Received`/`Disconnected` 投进 `Events()` 通道，通道随连接结束关闭；`Send` 用互斥锁串行化并设写超时；`Close` 先发关闭帧（1s 超时）再关底层连接，`sync.Once` 保证只关一次。应用侧 `connectSocket` 在 goroutine 里 `Dial`，结果经 `a.after` 落回 `t.conn` 与日志；`readSocket` 把每条事件也经 `a.after` 追加，并在回调里比对 `t.conn != conn` 丢弃已被替换/断开的连接尾巴；标签关闭走 `dropTabMenu` → `closeSocket`，日志上限 500 条；用户断开连接（`disconnectSocket`）直接清空日志，服务端关闭则留一行「已断开」；日志行 `摘要 Grow(1)`（内容在 `appendSocket` 里用 `collapseText` 折叠成一行、上限 `summaryLine=1024` 字符，**不再按 72 字符硬截断**——宽度交给行布局，窗口宽窄决定省略位置）+ 行尾定宽的大小与时间（`logSizeWidth`/`logTimeWidth`，`TextAlign(End)`，时间排在最后）；`过滤日志` 输入框写 `t.logFilter`，`logLines()` 按消息内容不区分大小写包含匹配给出要画的索引，头部计数在筛选时变成 `M / N 条`、无命中给「没有匹配「…」的日志」；消息行点开才建 `editor.State`（`toggleLogLine`，缓冲区内容先过 `prettyResponse`——JSON 消息按两空格缩进排版，和响应预览同一套缩进，否则原样；只读、`FitContent`、字号比编辑器默认小一号），关掉即置 nil，日志被裁剪时随之释放。
+  - **正确做法**：`internal/ws` 只做协议层——`Dial` 成功后起一条读 goroutine，把 `Received`/`Disconnected` 投进 `Events()` 通道，通道随连接结束关闭；`Send` 用互斥锁串行化并设写超时；`Close` 先发关闭帧（1s 超时）再关底层连接，`sync.Once` 保证只关一次。应用侧 `connectSocket` 在 goroutine 里 `Dial`，结果经 `a.after` 落回 `t.conn` 与日志；`readSocket` 把每条事件也经 `a.after` 追加，并在回调里比对 `t.conn != conn` 丢弃已被替换/断开的连接尾巴；标签关闭走 `dropTabMenu` → `closeSocket`，日志上限 500 条；用户断开连接（`disconnectSocket`）直接清空日志，服务端关闭则留一行「已断开」；日志行 `摘要 Grow(1)`（内容在 `appendSocket` 里用 `collapseText` 折叠成一行、上限 `summaryLine=1024` 字符，**不再按 72 字符硬截断**——宽度交给行布局，窗口宽窄决定省略位置）+ 行尾定宽时间（`logTimeWidth`，`TextAlign(End)`，时间排在最后），消息大小只在右侧详情标题栏显示；`过滤日志` 输入框写 `t.logFilter`，`logLines()` 按消息内容不区分大小写包含匹配给出要画的索引，头部计数在筛选时变成 `M / N 条`、无命中给「没有匹配「…」的日志」；日志详情只保留一个 `tab.logView`：`selectLogLine` 创建/复用只读编辑器，缓冲区先过 `prettyResponse`（JSON 按两空格缩进），`socketLogPane` 用 `SplitPercent` 分列表与右侧「消息详情」，默认列表 60%，`normalizeLogSplit` 把列表夹在至少 1/3（详情最多 2/3）。不再给 `wsEvent` 存 editor，也不在行内展开；`closeLogDetail` 统一关闭，清空、断开、裁剪和过滤隐藏选中项都调用它。关闭按钮与 editor 同帧构建时必须先检查 `logView != nil`，否则清空/关闭会 nil panic。
   - **补充（按钮）**：请求行的 `发送`/`保存`/`连接` 都是「图标 + 文字」，用 `iconButtonSpec{label, name, icon, disabled, plain, run}` + 自绘 `ButtonBase`（主按钮 `Background(p.Accent)` + `AccentText` 前景；次要按钮 `plain: true` 不铺底色、**保留 1px 边框**、用 `TextSecondary` 着色、悬浮时 `SurfaceHover`；`small: true` 再降一级（高 28、字号 Tiny、图标 12）；两者都 `MinWidth(测量宽度)`）；**不要用 `PrimaryButton(c, label)` 再挂 `Children`**——按钮自带的文字会和 Children 里的文字一起画，出现「发送 ⇄ 发送」。`name` 要与可见文字不同（`保存接口`/`发送请求`/`确认保存`/`保存环境`），否则 `ui.Tester.Find` 会命中同屏同名的另一个按钮（请求行、文件夹弹窗、环境弹窗都有「保存」）。
   - **验证方式**：`internal/ws/ws_test.go`（文本/二进制回声、子协议、关闭后事件通道关闭、握手被拒报状态码）；`internal/app/ws_test.go` 的 `TestSocketConnectsAndEchoes`（连接→日志→发送→回声→发送后清空→断开）、`TestSocketLogClears`、`TestSocketMessageFormatFollowsThePick`（格式落盘 + Binary 禁用提示）、`TestSocketSubprotocolReachesTheHandshake`（服务端真的收到 `chat`）、`TestSocketRequestKeepsItsMessage`（子协议/格式/消息写进接口文件再读回）。
   - **适用范围**：`internal/ws`、`internal/app/{view_websocket,socket}.go`、`internal/app/app.go`（`tab.conn/socketLog/protocol`、`savedFromTab`）、`internal/store/service_store.go`（`Request.Protocol`）、`internal/app/view_request.go`（`iconButton`）；以后接 SSE/Socket.IO 复用同一套「协议层通道 + 窗口线程落地」。
@@ -414,7 +414,7 @@
 - **标题**：`ui.Modal` 里的面板高度要自己算：给「滚动区」显式 `Height`，不是给面板 `Height`
   - **触发信号**：设置弹窗在矮窗口里把底部（版本/数据）顶出窗口，圆角都被切掉；给面板加 `.Height(...)` 或 `.MaxHeight(...)` 都没用。
   - **根因/约束**：`ui.Modal` 自身会在窗口内留约 40 DIP 的内边距，但**不会裁剪**超出的面板；面板的高度仍是内容撑出来的，里面 `ui.Scroll` 用 `Grow(1)` 时按内容高度参与计算，于是「限高」完全失效（`Height`/`MaxHeight` 都被内容顶破）。此外 `tt.Find` 返回的是布局位置而非可见性，滚动区里的内容即使被裁剪也照样能 Find 到，别拿它判断「是否显示」。
-  - **正确做法**：先算窗口能给的高度 `tall := min(settingsPanelHeight, height - 2*settingsModalInset)`，再把**滚动区**写成 `ui.Scroll(c).Height(tall - 2*settingsPadding - settingsTitleHeight - settingsGap)`（显式高度），面板本身不加 `Height`；面板高度自然等于「内边距 + 标题 + 间距 + 滚动区」。滚动区不要套 `noScrollbars`，滚动条是「下面还有内容」的提示。横排的标题、分栏等用常量把这个式子写清楚（`settingsPanelHeight/settingsPadding/settingsGap/settingsTitleHeight/settingsModalInset`）。
+  - **正确做法**：先算窗口能给的高度 `tall := min(settingsPanelHeight, height - 2*settingsModalInset)`，再把**滚动区**写成 `noScrollbars(ui.Scroll(c)).Height(tall - 2*settingsPadding - settingsTitleHeight - settingsGap)`（显式高度），面板本身不加 `Height`；面板高度自然等于「内边距 + 标题 + 间距 + 滚动区」。滚动条隐藏但滚轮、触摸板与 Shift+轮子保持可用。横排的标题、分栏等用常量把这个式子写清楚（`settingsPanelHeight/settingsPadding/settingsGap/settingsTitleHeight/settingsModalInset`）。
   - **验证方式**：`TestSettingsFitAShortWindow`（1280×560 下窗口底部的像素是遮罩色而不是面板白，`tt.Scroll` 之后「版本」上移）；截图 `docs/shots/settings-modal.png`。改回「给面板 `Height`」时底部像素立刻变白（255）。
   - **适用范围**：`internal/app/view_env.go`（`settingsModal`）；任何放进 `ui.Modal` 且内容可能超过窗口的面板。
 
@@ -457,7 +457,7 @@
 - **标题**：请求超时是「可配 + 挂在 context 上」，别写死在 `http.Client.Timeout`
   - **触发信号**：原来 `req.Execute` 里写死 `&http.Client{Timeout: 30 * time.Second}`，用户要求超时可配、默认 30 分钟。
   - **根因/约束**：`http.Client.Timeout` 与请求的 context 是两条独立的截止线，取更早的那个；把它留在 `Execute` 里会让「设置里的超时」和写死的 30 秒互相打架，而且 `Execute` 拿不到设置。另一方面 `context.WithTimeout` 同样管到 body 读完（请求 context 取消会掐断连接，`io.ReadAll` 跟着报错），所以挂 ctx 不会漏掉慢响应的场景。
-  - **正确做法**：`send` 里改成 `context.WithTimeout(context.Background(), a.requestTimeout())`（`cancel` 仍是取消按钮），`req.Execute` 的 client 不再设 `Timeout`（注释写明截止时间来自调用方的 ctx）；超时秒数进 `store.Settings.TimeoutSeconds`（0 视为默认），`requestTimeoutSeconds` 负责夹在 1–86400 之间并把 0 换成 1800；设置「通用」里与「响应体上限」并排一行放「请求超时（秒）」（两个数字输入共用一行是为了不把下面的「数据/更换目录」挤出面板——见另一条 `ui.Modal` 限高的经验）。文案：`describe` 把 `context.DeadlineExceeded` 翻成「请求超时」，手动取消仍是「请求已取消」。
+  - **正确做法**：`send` 里改成 `context.WithTimeout(context.Background(), a.requestTimeout())`（`cancel` 仍是取消按钮），`req.Execute` 的 client 不再设 `Timeout`（注释写明截止时间来自调用方的 ctx）；超时秒数进 `store.Settings.TimeoutSeconds`（0 视为默认），`requestTimeoutSeconds` 负责夹在 1–86400 之间并把 0 换成 1800；设置「通用」的右侧设置项采用纵向单列，响应体上限与请求超时依次排列，每行最多占右侧区域 90% 宽，下面的「数据/更换目录」通过面板滚动到达（见另一条 `ui.Modal` 限高的经验）。文案：`describe` 把 `context.DeadlineExceeded` 翻成「请求超时」，手动取消仍是「请求已取消」。
   - **验证方式**：`internal/app/timeout_test.go` 的 `TestRequestTimeoutDefaultsToHalfAnHour`（新 app 30 分钟、0/负数取默认、越界夹到上限）与 `TestRequestTimeoutGivesUpOnASlowServer`（设 0.2 秒、打一个永不返回的 httptest 服务：0.2 秒后返回 `请求超时`，界面出现同样的字）；`TestSettingsRoundTrip` 断言 90 秒能落盘并在重启后读回。
   - **适用范围**：`internal/app/app.go`（`requestTimeout`/`requestTimeoutSeconds`/`send`）、`internal/store/service_settings.go`、`internal/app/view_env.go`（`timeoutField`）、`internal/req/http.go`（`Execute`）；以后加「按标签页单独设超时」也走 ctx，不要再给 client 加固定 Timeout。
 

@@ -62,12 +62,19 @@ func TestThemeFollowsPalette(t *testing.T) {
 			t.Errorf("%v theme font %v radius %v, want %v and %v",
 				mode, th.FontSize, th.Radius, FontSizeBody, Radius)
 		}
-		if th.Font != FontFamily {
-			t.Errorf("%v theme family %q, want the embedded %q", mode, th.Font, FontFamily)
+		if th.Font != FontWithFallback(FontFamily) {
+			t.Errorf("%v theme family %q, want the embedded font with sans-serif fallback", mode, th.Font)
 		}
 		if th.Accent != DefaultAccent.Base {
 			t.Errorf("%v theme accent %v, want the default %v", mode, th.Accent, DefaultAccent.Base)
 		}
+	}
+}
+
+func TestThemeWithFontUsesTheChoiceAndFallback(t *testing.T) {
+	th := ThemeWithFont(Light, DefaultAccent, "Microsoft YaHei UI")
+	if th.Font != "Microsoft YaHei UI, sans-serif" {
+		t.Errorf("theme family %q, want the selected font with sans-serif fallback", th.Font)
 	}
 }
 

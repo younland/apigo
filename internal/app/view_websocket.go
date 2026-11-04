@@ -137,9 +137,22 @@ func (a *app) socketProtocolPane(c *ui.Context, p design.Palette, t *tab) {
 	})
 }
 
-// socketLogPane is the log under a socket: what the connection did, newest
-// last.
+// socketLogPane gives the log its full width until an event is picked, then
+// splits it with the one detail panel on the right.
 func (a *app) socketLogPane(c *ui.Context, p design.Palette, t *tab) {
+	if t.logView == nil {
+		a.socketLogListPane(c, p, t)
+		return
+	}
+	t.normalizeLogSplit()
+	ui.SplitPercent(c, &t.logListPercent, func() {
+		a.socketLogListPane(c, p, t)
+	}, func() {
+		a.socketLogDetail(c, p, t)
+	}).Fill()
+}
+
+func (a *app) socketLogListPane(c *ui.Context, p design.Palette, t *tab) {
 	ui.Column(c).FillWidth().FillHeight().Background(p.Background).Children(func() {
 		ui.Row(c).FillWidth().Height(44).Padding(0, design.PanelPadding).
 			Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
@@ -154,12 +167,40 @@ func (a *app) socketLogPane(c *ui.Context, p design.Palette, t *tab) {
 					ui.Text(c, "清空").FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
 				})
 				if btn.Clicked() {
-					t.socketLog = nil
+					t.clearSocketLog()
 				}
 			}
 		})
 		a.divider(c, p)
 		a.socketLogList(c, p, t)
+	})
+}
+
+// socketLogDetail is the one code panel beside the log, closed by its cross.
+func (a *app) socketLogDetail(c *ui.Context, p design.Palette, t *tab) {
+	if t.logView == nil {
+		return // the list closed it earlier in this build
+	}
+	ui.Column(c).FillWidth().FillHeight().Label("日志详情面板").Background(p.Background).Children(func() {
+		ui.Row(c).FillWidth().Height(44).Padding(0, design.PanelPadding).
+			Gap(design.RowGap).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "消息详情").Bold().FontSize(design.FontSizeBody).TextColor(p.Text)
+			ui.Row(c).Grow(1)
+			if t.logIndex >= 0 && t.logIndex < len(t.socketLog) && t.socketLog[t.logIndex].message() {
+				ui.Text(c, formatSize(t.socketLog[t.logIndex].size)).Label("消息大小").
+					FontSize(design.FontSizeTiny).TextColor(p.TextMuted)
+			}
+			if ui.ButtonBase(c).Width(24).Height(24).Label("关闭消息详情").Cursor(ui.CursorPointer).
+				Children(func() {
+					ui.Icon(c, icons.Close).FontSize(12).TextColor(p.TextMuted)
+				}).Clicked() {
+				t.closeLogDetail()
+			}
+		})
+		a.divider(c, p)
+		if t.logView != nil {
+			editor.View(c, t.logView).Grow(1).FillWidth()
+		}
 	})
 }
 
@@ -202,6 +243,9 @@ func (a *app) socketLogList(c *ui.Context, p design.Palette, t *tab) {
 		return
 	}
 	lines := t.logLines()
+	if t.logView != nil && !logLineVisible(lines, t.logIndex) {
+		t.closeLogDetail()
+	}
 	if len(lines) == 0 {
 		a.logEmpty(c, p, "没有匹配「"+strings.TrimSpace(t.logFilter)+"」的日志")
 		return
@@ -215,6 +259,15 @@ func (a *app) socketLogList(c *ui.Context, p design.Palette, t *tab) {
 	})
 }
 
+func logLineVisible(lines []int, selected int) bool {
+	for _, i := range lines {
+		if i == selected {
+			return true
+		}
+	}
+	return false
+}
+
 // logEmpty says why the log shows no line, in the room its lines would take.
 func (a *app) logEmpty(c *ui.Context, p design.Palette, text string) {
 	ui.Column(c).Grow(1).FillWidth().Center().Children(func() {
@@ -222,17 +275,11 @@ func (a *app) logEmpty(c *ui.Context, p design.Palette, text string) {
 	})
 }
 
-// logTimeWidth and logSizeWidth keep the size and the time of a log line in
-// their own columns at the end of the row, so the messages all start and end at
-// the same place. The time comes last, where the log's eye runs to.
-const (
-	logTimeWidth float32 = 60
-	logSizeWidth float32 = 52
-)
+// logTimeWidth keeps the time of a log line in its own column at the row's end.
+const logTimeWidth float32 = 60
 
-// socketLogRow is one line of the log: what happened, when, and — for a message
-// the reader opened — the content it carried. The message takes the room the
-// row has, with the size and the time in fixed columns after it.
+// socketLogRow is one line of the log: what happened and when, with the size
+// shown only in the detail. Picking it updates the detail beside the list.
 func (a *app) socketLogRow(c *ui.Context, p design.Palette, t *tab, i int) {
 	line := t.socketLog[i]
 	mark, color := "•", p.TextMuted
@@ -249,38 +296,21 @@ func (a *app) socketLogRow(c *ui.Context, p design.Palette, t *tab, i int) {
 	row := ui.ButtonBase(c).FillWidth().Justify(ui.Start).Gap(design.RowGap).
 		Padding(4, design.PanelPadding).Cursor(ui.CursorPointer).Label("日志 " + line.summary())
 	row.Children(func() {
-		if line.message() {
-			caret := ui.Icon(c, icons.Chevron).FontSize(10).TextColor(p.TextMuted)
-			if line.view == nil {
-				caret.Rotate(-90)
-			}
-		}
 		ui.Text(c, mark).FontSize(design.FontSizeTiny).TextColor(color).SingleLine()
 		ui.Text(c, line.summary()).FontSize(design.FontSizeBody).TextColor(p.TextSecondary).
 			SingleLine().Grow(1)
-		size := ""
-		if line.message() {
-			size = formatSize(line.size)
-		}
-		ui.Text(c, size).FontSize(design.FontSizeTiny).TextColor(p.TextMuted).
-			SingleLine().Width(logSizeWidth).TextAlign(ui.End)
 		ui.Text(c, line.at.Format("15:04:05")).FontSize(design.FontSizeTiny).
 			TextColor(p.TextMuted).SingleLine().Width(logTimeWidth).TextAlign(ui.End)
 	})
-	// The pointer over a line says it can be opened, over a message it does.
 	if row.Hovered() {
 		row.Background(p.SurfaceHover)
 	}
+	if t.logView != nil && t.logIndex == i {
+		row.Background(p.Accent.Alpha(accentTint))
+	}
 	if row.Clicked() {
-		a.toggleLogLine(t, i)
+		a.selectLogLine(t, i)
 	}
-	if line.view == nil {
-		return
-	}
-	ui.Column(c).FillWidth().Padding(0, design.PanelPadding*2).Children(func() {
-		editor.View(c, line.view).FillWidth()
-	})
-	a.divider(c, p)
 }
 
 // iconButtonSpec is a button of a request line: the text it shows, the name it

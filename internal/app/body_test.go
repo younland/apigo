@@ -210,7 +210,7 @@ func TestBodyFormatPillsShowTheirLabels(t *testing.T) {
 		}
 		// What the label needs, as the text engine advances it.
 		var advance float32
-		font := ui.Font{Family: design.FontFamily, Size: design.FontSizeBody, Weight: 400}
+		font := ui.Font{Family: design.FontWithFallback(design.FontFamily), Size: design.FontSizeBody, Weight: 400}
 		for _, glyph := range ui.Shape(format.Label, font) {
 			advance += glyph.Advance
 		}

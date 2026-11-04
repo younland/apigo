@@ -82,8 +82,16 @@ func TestSocketConnectsAndEchoes(t *testing.T) {
 	}
 	waitForApply(t, pending) // the echo comes back
 	tt.Frame()
-	if !tt.HasText("你好") || !tt.HasText("6 B") {
-		t.Errorf("texts %q, want the message and its size echoed back", tt.Texts())
+	if !tt.HasText("你好") {
+		t.Errorf("texts %q, want the message echoed back", tt.Texts())
+	}
+	if err := tt.Click("日志 你好"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tab := a.current()
+	if !tt.HasText("消息大小") || tab.logIndex < 0 || formatSize(tab.socketLog[tab.logIndex].size) != "6 B" {
+		t.Errorf("texts %q and selected log %d, want the echoed message size in the detail", tt.Texts(), tab.logIndex)
 	}
 	if got := a.current().body.String(); got != "" {
 		t.Errorf("message %q after sending, want it cleared", got)
@@ -115,6 +123,13 @@ func TestSocketLogClears(t *testing.T) {
 	if !tt.HasText("正在连接到 " + socketAddress(server)) {
 		t.Fatalf("texts %q, want the attempt in the log", tt.Texts())
 	}
+	if err := tt.Click("日志 正在连接到 " + socketAddress(server)); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.current().logView == nil {
+		t.Fatal("the log note did not open in the detail panel")
+	}
 
 	if err := tt.Click("清空日志"); err != nil {
 		t.Fatal(err)
@@ -122,6 +137,9 @@ func TestSocketLogClears(t *testing.T) {
 	tt.Frame()
 	if tt.HasText("正在连接到 " + socketAddress(server)) {
 		t.Error("the log still holds what 清空日志 cleared")
+	}
+	if a.current().logView != nil {
+		t.Error("clearing the log left its detail panel open")
 	}
 }
 
@@ -148,8 +166,16 @@ func TestSocketMessageFormatFollowsThePick(t *testing.T) {
 	}
 	waitForApply(t, pending)
 	tt.Frame()
-	if !tt.HasText(`{"ping":true}`) || !tt.HasText("13 B") {
+	if !tt.HasText(`{"ping":true}`) {
 		t.Errorf("texts %q, want the JSON message echoed", tt.Texts())
+	}
+	if err := tt.Click(`日志 {"ping":true}`); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tab := a.current()
+	if !tt.HasText("消息大小") || tab.logIndex < 0 || formatSize(tab.socketLog[tab.logIndex].size) != "13 B" {
+		t.Errorf("texts %q and selected log %d, want the JSON message size in the detail", tt.Texts(), tab.logIndex)
 	}
 
 	// A binary message is refused with a reason rather than sent empty: open the
@@ -257,9 +283,10 @@ func TestSocketRequestKeepsItsMessage(t *testing.T) {
 	}
 }
 
-// TestSocketLogLineOpensItsContent checks a message line opens into the code
-// view of what it carried, and closes again.
-func TestSocketLogLineOpensItsContent(t *testing.T) {
+// TestSocketLogLineOpensRightPanel checks a message opens in the one code
+// panel beside the log, another message replaces its content, and closing the
+// panel gives the log its room back.
+func TestSocketLogLineOpensRightPanel(t *testing.T) {
 	server := echoSocket(t)
 	a, pending := socketApp(t, socketAddress(server))
 	tt := ui.NewTester(a.view, 1280, 800)
@@ -276,33 +303,80 @@ func TestSocketLogLineOpensItsContent(t *testing.T) {
 	waitForApply(t, pending) // the echo: the sent line is added on this thread
 	tt.Frame()
 
-	// The line opens into a read-only code view of the whole message, indented
-	// as the response preview indents JSON.
-	tt.Click(`日志 {"ping":true}`)
-	tt.Frame()
-	opened := 0
-	for _, line := range a.current().socketLog {
-		if line.view != nil {
-			opened++
-			if got, want := line.view.Buffer.String(), "{\n  \"ping\": true\n}"; got != want {
-				t.Errorf("opened line holds %q, want the whole message indented %q", got, want)
-			}
-			if !line.view.ReadOnly {
-				t.Error("the opened message is editable, want it read-only")
-			}
-		}
+	if err := tt.Click(`日志 {"ping":true}`); err != nil {
+		t.Fatal(err)
 	}
-	if opened == 0 {
-		t.Fatal("clicking a message line opened nothing")
+	tt.Frame()
+	tab := a.current()
+	if tab.logView == nil {
+		t.Fatal("clicking a message opened no right panel")
+	}
+	if got, want := tab.logView.Buffer.String(), "{\n  \"ping\": true\n}"; got != want {
+		t.Errorf("panel holds %q, want the whole message indented %q", got, want)
+	}
+	if !tab.logView.ReadOnly {
+		t.Error("the panel message is editable, want it read-only")
+	}
+	if !tt.HasText("消息详情") {
+		t.Errorf("texts %q, want the right panel title", tt.Texts())
+	}
+	if !tt.HasText("消息大小") {
+		t.Errorf("texts %q, want the selected message size in the detail", tt.Texts())
 	}
 
-	// A second click closes it again.
-	tt.Click(`日志 {"ping":true}`)
+	firstView := tab.logView
+	tab.appendSocket(wsEvent{kind: socketGot, at: time.Now(), text: `{"other":true}`})
 	tt.Frame()
-	for _, line := range a.current().socketLog {
-		if line.view != nil {
-			t.Fatal("the message line stayed open after a second click")
-		}
+	if err := tt.Click(`日志 {"other":true}`); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tab.logView != firstView {
+		t.Error("another message created a second editor, want the one panel updated")
+	}
+	if got := tab.logView.Buffer.String(); got != "{\n  \"other\": true\n}" {
+		t.Errorf("panel holds %q after another message, want the new content", got)
+	}
+	if err := tt.Click("关闭消息详情"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tab.logView != nil || tt.HasText("消息详情") {
+		t.Error("the right panel remained after closing it")
+	}
+}
+
+func TestSocketLogDetailResizesWithinTwoThirds(t *testing.T) {
+	a := testApp(t)
+	if err := a.addRequest(kindWebSocket, ""); err != nil {
+		t.Fatal(err)
+	}
+	a.current().socketLog = []wsEvent{{kind: socketGot, at: time.Now(), text: `{"pong":true}`}}
+	tt := ui.NewTester(a.view, 1280, 800)
+	tt.Frame()
+	if err := tt.Click(`日志 {"pong":true}`); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	panel, ok := tt.Find("日志详情面板")
+	if !ok {
+		t.Fatal("no right detail panel")
+	}
+	before := a.current().logListPercent
+	tt.Press(panel.X-1, panel.Y+80)
+	tt.Move(panel.X-200, panel.Y+80)
+	tt.Release(panel.X-200, panel.Y+80)
+	tt.Frame()
+	if got := a.current().logListPercent; got >= before {
+		t.Errorf("list percentage %v after widening the detail, want less than %v", got, before)
+	}
+	panel, _ = tt.Find("日志详情面板")
+	tt.Press(panel.X-1, panel.Y+80)
+	tt.Move(0, panel.Y+80)
+	tt.Release(0, panel.Y+80)
+	tt.Frame()
+	if got := a.current().logListPercent; got != minLogListPercent {
+		t.Errorf("list percentage %v beyond the detail cap, want %v", got, minLogListPercent)
 	}
 }
 
@@ -415,11 +489,21 @@ func TestSocketLogFilters(t *testing.T) {
 	if tt.HasText("已连接 ws://127.0.0.1:6976/ws") || tt.HasText(`{"ping":true}`) {
 		t.Errorf("texts %q, want the other lines gone", tt.Texts())
 	}
+	if err := tt.Click(`日志 {"type":7,"body":{"state":"idle"}}`); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.current().logView == nil {
+		t.Fatal("the matching log did not open in the detail panel")
+	}
 
 	a.current().logFilter = "NOPE"
 	tt.Frame()
 	if !tt.HasText("没有匹配「NOPE」的日志") {
 		t.Errorf("texts %q, want the empty state of a filter that matches nothing", tt.Texts())
+	}
+	if a.current().logView != nil {
+		t.Error("filtering out the selected log left its detail open")
 	}
 }
 

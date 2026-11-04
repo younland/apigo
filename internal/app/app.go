@@ -127,11 +127,16 @@ type tab struct {
 	protocol    string
 	msgFormat   string
 	logFilter   string
+	// logView is the one detail editor beside the log, and logIndex the event
+	// it shows. logListPercent is the list's share when the detail is open.
+	logView        *editor.State
+	logIndex       int
+	logListPercent float32
 }
 
 func newTab() *tab {
 	t := &tab{kind: kindREST, method: "GET", title: "Untitled", bodyType: "json",
-		clearOnSend: true}
+		clearOnSend: true, logIndex: -1, logListPercent: defaultLogListPercent}
 	// A path takes its parameters from its address: the table reads them, and
 	// the reader fills in the values.
 	t.pathParams.Fixed = true
@@ -253,8 +258,10 @@ type app struct {
 	systemDark  bool
 	theme       *ui.Theme
 	themeAccent string // the accent the theme was built with
+	themeFont   string // the font list the theme was built with
 	accent      string // the accent choice, "" for the default
-	language    string // the interface language Picked in the settings
+	language    string // the interface language picked in the settings
+	font        string // the interface font picked in the settings
 
 	spaces map[string]*workspace
 	open   []string // the open collections, in tab order
@@ -374,6 +381,7 @@ func newApp() *app {
 		applied:        design.Mode(-1),
 		accent:         design.DefaultAccent.Name,
 		language:       languages[0],
+		font:           design.FontFamily,
 		percent:        55,
 		maxResponseMB:  defaultResponseLimitMB,
 		timeoutSeconds: defaultTimeoutSeconds,
@@ -1112,8 +1120,8 @@ func (a *app) resolvedMode() design.Mode {
 // accent is the accent choice in use.
 func (a *app) accentColor() design.Accent { return design.AccentByName(a.accent) }
 
-// applySettings takes the appearance, accent, language, response limit and
-// update choice the last run kept.
+// applySettings takes the appearance, accent, language, font, response limit
+// and update choice the last run kept.
 func (a *app) applySettings() {
 	s := a.store.Settings
 	a.mode = design.ParseMode(s.Mode)
@@ -1123,19 +1131,24 @@ func (a *app) applySettings() {
 	if s.Language != "" {
 		a.language = s.Language
 	}
+	a.font = design.FontFamily
+	if s.Font != "" {
+		a.font = s.Font
+	}
 	a.maxResponseMB = float64(responseLimitMB(s.MaxResponseMB))
 	a.timeoutSeconds = float64(requestTimeoutSeconds(s.TimeoutSeconds))
 	a.autoUpdate = s.AutoUpdate
 	a.applied = design.Mode(-1) // the theme is built again with them
 }
 
-// rememberSettings keeps the appearance, accent, language, response limit,
-// request timeout and update choice for the next run.
+// rememberSettings keeps the appearance, accent, language, font, response
+// limit, request timeout and update choice for the next run.
 func (a *app) rememberSettings() error {
 	a.store.Settings = settings{
 		Mode:           a.mode.Key(),
 		Accent:         a.accent,
 		Language:       a.language,
+		Font:           a.font,
 		MaxResponseMB:  int(math.Round(a.maxResponseMB)),
 		TimeoutSeconds: int(math.Round(a.timeoutSeconds)),
 		AutoUpdate:     a.autoUpdate,
@@ -1189,9 +1202,10 @@ func (a *app) themeFor(c *ui.Context) *ui.Theme {
 	}
 	target := a.resolvedMode()
 	accent := a.accentColor()
-	if a.theme == nil || a.applied != target || a.themeAccent != accent.Name {
-		a.theme = design.Theme(target, accent)
-		a.applied, a.themeAccent = target, accent.Name
+	font := design.FontWithFallback(a.font)
+	if a.theme == nil || a.applied != target || a.themeAccent != accent.Name || a.themeFont != font {
+		a.theme = design.ThemeWithFont(target, accent, a.font)
+		a.applied, a.themeAccent, a.themeFont = target, accent.Name, font
 	}
 	return a.theme
 }

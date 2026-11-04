@@ -13,6 +13,9 @@ type Settings struct {
 	Mode     string `yaml:"appearance,omitempty"`
 	Accent   string `yaml:"accent,omitempty"`
 	Language string `yaml:"language,omitempty"`
+	// Font is the interface family, empty for Inter Variable. Glyphs it does
+	// not cover use the generic sans-serif fallback.
+	Font string `yaml:"font,omitempty"`
 	// MaxResponseMB caps a response body, in megabytes: zero keeps the
 	// default.
 	MaxResponseMB int `yaml:"maxResponseMB,omitempty"`

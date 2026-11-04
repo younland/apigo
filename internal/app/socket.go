@@ -26,8 +26,8 @@ const (
 	socketFail                      // something that went wrong
 )
 
-// wsEvent is one line of a socket's log. A message keeps the read-only editor
-// it opens into, made when the reader expands the line.
+// wsEvent is one line of a socket's log. The tab keeps one detail editor for
+// whichever event the reader picks, rather than one editor per event.
 type wsEvent struct {
 	kind socketLogKind
 	at   time.Time
@@ -36,7 +36,6 @@ type wsEvent struct {
 	// line is text folded into the one line a collapsed row shows, cut to
 	// summaryLine; the row cuts it further to its own width.
 	line string
-	view *editor.State
 }
 
 // message reports whether the line holds a message, which expands into its
@@ -93,6 +92,11 @@ func socketFormat(key string) (label, language string) {
 // grow the app's memory with every message.
 const socketLogLimit = 500
 
+const (
+	minLogListPercent     = 100.0 / 3 // the detail never takes more than two thirds
+	defaultLogListPercent = 60
+)
+
 // appendSocket adds a line to the log of a tab, dropping the oldest when the
 // log is full. The line a row shows is folded here, once, rather than every
 // frame.
@@ -100,8 +104,28 @@ func (t *tab) appendSocket(event wsEvent) {
 	event.line = collapseText(event.text)
 	t.socketLog = append(t.socketLog, event)
 	if len(t.socketLog) > socketLogLimit {
-		t.socketLog = t.socketLog[len(t.socketLog)-socketLogLimit:]
+		dropped := len(t.socketLog) - socketLogLimit
+		t.socketLog = t.socketLog[dropped:]
+		if t.logIndex >= 0 && t.logIndex < dropped {
+			t.closeLogDetail()
+		} else if t.logIndex >= dropped {
+			t.logIndex -= dropped
+		}
 	}
+}
+
+func (t *tab) normalizeLogSplit() {
+	t.logListPercent = min(max(t.logListPercent, minLogListPercent), 100)
+}
+
+func (t *tab) clearSocketLog() {
+	t.socketLog = nil
+	t.closeLogDetail()
+}
+
+func (t *tab) closeLogDetail() {
+	t.logView = nil
+	t.logIndex = -1
 }
 
 // socketHandshake is what the dial sends: the headers of the request pane, and
@@ -207,32 +231,28 @@ func (a *app) disconnectSocket(t *tab) {
 	}
 	t.conn = nil
 	_ = conn.Close()
-	t.socketLog = nil
+	t.clearSocketLog()
 }
 
-// toggleLogLine opens a logged message into its content, or closes it again. A
-// JSON message opens indented, as the response preview indents one, so a long
-// object reads as a tree rather than one wrapped line.
-func (a *app) toggleLogLine(t *tab, i int) {
+// selectLogLine shows an event in the tab's one detail editor. Another pick
+// replaces only that editor's buffer; JSON is indented as the response preview.
+func (a *app) selectLogLine(t *tab, i int) {
 	if i < 0 || i >= len(t.socketLog) {
 		return
 	}
-	line := &t.socketLog[i]
-	if line.view != nil {
-		line.view = nil
-		return
-	}
+	line := t.socketLog[i]
 	buffer := editor.NewBuffer(prettyResponse(line.text))
 	buffer.SetLanguage(t.logLanguage(line.text))
-	line.view = &editor.State{
-		Buffer: buffer,
-		// A logged message reads a size down from the editor's own 13, so more
-		// of it fits under the line it belongs to.
-		Font:       ui.Font{Size: design.FontSizeBody - 1},
-		ReadOnly:   true,
-		SoftWrap:   true,
-		FitContent: true,
+	if t.logView == nil {
+		t.logView = &editor.State{
+			Font:     ui.Font{Size: design.FontSizeBody - 1},
+			ReadOnly: true,
+			SoftWrap: true,
+		}
 	}
+	t.logView.Buffer = buffer
+	t.logIndex = i
+	t.normalizeLogSplit()
 }
 
 // logLanguage is the syntax a logged message reads in: JSON when the message is

@@ -159,7 +159,10 @@ func TestTopBarScrollsWithoutBar(t *testing.T) {
 // its own.
 func measureBodyText(s string) float32 {
 	var w float32
-	ui.Render(func(c *ui.Context) { w = textWidth(c, s) }, 10, 10, 1)
+	ui.Render(func(c *ui.Context) {
+		c.SetTheme(design.Theme(design.Light, design.DefaultAccent))
+		w = textWidth(c, s)
+	}, 10, 10, 1)
 	return w
 }
 

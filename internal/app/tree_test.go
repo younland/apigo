@@ -286,11 +286,17 @@ func TestOpenTabHighlightsItsRow(t *testing.T) {
 	// The name of the open interface is drawn in the accent.
 	row, _ := tt.Find("请求 Pets")
 	accent := a.palette().Accent
+	const tolerance = 48 // antialiased glyph edges need not equal the accent exactly
+	nearAccent := func(c color.RGBA) bool {
+		return int(c.R) >= int(accent.R)-tolerance && int(c.R) <= int(accent.R)+tolerance &&
+			int(c.G) >= int(accent.G)-tolerance && int(c.G) <= int(accent.G)+tolerance &&
+			int(c.B) >= int(accent.B)-tolerance && int(c.B) <= int(accent.B)+tolerance
+	}
 	img := tt.Image()
 	found := false
 	for y := int(row.Y); y < int(row.Y+row.H) && !found; y++ {
 		for x := int(row.X); x < int(row.X+row.W); x++ {
-			if c := img.RGBAAt(x, y); c.R == accent.R && c.G == accent.G && c.B == accent.B {
+			if nearAccent(img.RGBAAt(x, y)) {
 				found = true
 				break
 			}

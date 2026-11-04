@@ -377,7 +377,7 @@ func TestShots(t *testing.T) {
 				{kind: socketGot, at: shotTime(3), size: 33,
 					text: "{\n  \"type\": 9,\n  \"body\": {\"multi\": false}\n}"},
 			}
-			a.toggleLogLine(t, 1)
+			a.selectLogLine(t, 1)
 		}},
 		{"websocket-format-menu", design.Light, func(a *app) {
 			*a = *demoApp()
@@ -462,6 +462,10 @@ func TestShots(t *testing.T) {
 		}},
 		{"settings-modal", design.Light, func(a *app) {
 			*a = *settingsDemo()
+		}},
+		{"settings-font-menu", design.Light, func(a *app) {
+			*a = *settingsDemo()
+			*a.menuFlag("settings-font") = true
 		}},
 		{"delete-collection-confirm", design.Light, func(a *app) {
 			*a = *demoApp()

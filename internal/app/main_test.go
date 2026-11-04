@@ -530,8 +530,8 @@ func TestWindowThemeFollowsPalette(t *testing.T) {
 		t.Errorf("theme borders %v background %v, want %v and %v",
 			a.theme.Border, a.theme.Background, want.Border, want.Background)
 	}
-	if a.theme.Font != design.FontFamily {
-		t.Errorf("theme family %q, want %q", a.theme.Font, design.FontFamily)
+	if a.theme.Font != design.FontWithFallback(design.FontFamily) {
+		t.Errorf("theme family %q, want Inter Variable with sans-serif fallback", a.theme.Font)
 	}
 }
 
@@ -579,6 +579,7 @@ func TestSettingsModal(t *testing.T) {
 	if a.mode != design.System {
 		t.Errorf("appearance %v, want 跟随系统", a.mode)
 	}
+	scrollSettingsToBottom(tt)
 
 	if err := tt.Click("强调色 Blue"); err != nil {
 		t.Fatal(err)
@@ -594,6 +595,11 @@ func TestSettingsModal(t *testing.T) {
 	if a.theme == nil || a.theme.Accent != want.Base {
 		t.Errorf("theme %v, want the accent %v", a.theme, want.Base)
 	}
+}
+
+func scrollSettingsToBottom(tt *ui.Tester) {
+	tt.Scroll(640, 400, 0, 1000)
+	tt.Frame()
 }
 
 // TestChooseDataDir checks 更换目录 moves the app to the collections of the
@@ -612,6 +618,7 @@ func TestChooseDataDir(t *testing.T) {
 	if err := tt.Click("设置"); err != nil {
 		t.Fatal(err)
 	}
+	scrollSettingsToBottom(tt)
 	if err := tt.Click("更换目录"); err != nil {
 		t.Fatal(err)
 	}
@@ -645,6 +652,7 @@ func TestChooseDataDirCancelled(t *testing.T) {
 	if err := tt.Click("设置"); err != nil {
 		t.Fatal(err)
 	}
+	scrollSettingsToBottom(tt)
 	if err := tt.Click("更换目录"); err != nil {
 		t.Fatal(err)
 	}
@@ -1288,7 +1296,6 @@ func TestSettingsFitAShortWindow(t *testing.T) {
 	if r, _, _, _ := tt.Image().RGBAAt(640, 555).RGBA(); r>>8 > 200 {
 		t.Errorf("the bottom of the window is %d, want the backdrop around the panel", r>>8)
 	}
-
 	before, ok := tt.Find("版本")
 	if !ok {
 		t.Fatal("texts of a short window hold no version line")

@@ -47,6 +47,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	a := newApp()
 	a.store = s
 	a.mode, a.accent, a.language = design.Dark, "Blue", "简体中文"
+	a.font = "Microsoft YaHei UI"
 	a.maxResponseMB = 64
 	a.timeoutSeconds = 90
 	if err := a.rememberSettings(); err != nil {
@@ -68,6 +69,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if restarted.language != "简体中文" {
 		t.Errorf("language %q after a restart, want 简体中文", restarted.language)
+	}
+	if restarted.font != "Microsoft YaHei UI" {
+		t.Errorf("font %q after a restart, want Microsoft YaHei UI", restarted.font)
 	}
 	if got := restarted.palette().Accent; got != design.AccentByName("Blue").Base {
 		t.Errorf("palette accent %v after a restart, want Blue", got)

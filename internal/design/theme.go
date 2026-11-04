@@ -5,6 +5,12 @@ import "github.com/egoist/mygo/ui"
 // Theme turns a palette into the theme MyGo's widgets draw with, so inputs,
 // buttons and scroll bars match the colors of the app around them.
 func Theme(m Mode, accent Accent) *ui.Theme {
+	return ThemeWithFont(m, accent, FontFamily)
+}
+
+// ThemeWithFont builds a theme with the selected interface font and the
+// generic sans-serif fallback for glyphs it does not cover.
+func ThemeWithFont(m Mode, accent Accent, family string) *ui.Theme {
 	p := PaletteFor(m, accent)
 	t := ui.LightTheme()
 	if p.Dark {
@@ -36,8 +42,8 @@ func Theme(m Mode, accent Accent) *ui.Theme {
 	t.Radius = Radius
 	t.Spacing = 4
 	t.FontSize = FontSizeBody
-	// The embedded family, for every element that does not ask for another,
+	// The selected family, for every element that does not ask for another,
 	// as the request body and URL ask for a monospaced one.
-	t.Font = FontFamily
+	t.Font = FontWithFallback(family)
 	return t
 }

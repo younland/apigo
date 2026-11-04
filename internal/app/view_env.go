@@ -223,9 +223,10 @@ var appearances = []struct {
 // window the sections scroll inside it, rather than pushing the last of them
 // past the window's edge.
 const (
-	settingsPanelHeight float32 = 720
-	settingsPadding     float32 = 24
-	settingsGap         float32 = 16
+	settingsPanelHeight      float32 = 720
+	settingsPadding          float32 = 24
+	settingsGap              float32 = 16
+	settingsLabelColumnWidth float32 = 180
 	// settingsTitleHeight is the room the head of the panel takes.
 	settingsTitleHeight float32 = 32
 	// settingsModalInset is the room the modal keeps around its panel.
@@ -247,8 +248,8 @@ func (a *app) settingsModal(c *ui.Context, p design.Palette) {
 			Background(p.Background).Radius(8).Children(func() {
 			a.settingsTitle(c, p)
 			// The body caps itself instead of the panel: the sections past its edge
-			// scroll, and the bar says there are more.
-			ui.Scroll(c).Height(body).FillWidth().Children(func() {
+			// scroll without drawing a scrollbar over them.
+			noScrollbars(ui.Scroll(c)).Height(body).FillWidth().Children(func() {
 				a.settingsSections(c, p)
 			})
 		})
@@ -274,20 +275,22 @@ func (a *app) settingsTitle(c *ui.Context, p design.Palette) {
 func (a *app) settingsSections(c *ui.Context, p design.Palette) {
 	ui.Column(c).FillWidth().Gap(20).Children(func() {
 		a.settingsSection(c, p, "通用", "应用程序中使用的通用设置", func() {
-			a.settingsLabel(c, p, "语言")
-			a.languagePicker(c, p)
+			ui.Column(c).FillWidth().Gap(6).Children(func() {
+				a.settingsLabel(c, p, "语言")
+				a.languagePicker(c, p)
+			})
+			ui.Column(c).FillWidth().Gap(6).Children(func() {
+				a.settingsLabel(c, p, "界面字体")
+				a.fontPicker(c, p)
+			})
 			ui.Row(c).Height(design.RowGap)
-			// The two limits sit side by side: both are one number, and the pane
-			// has room for the sections under them only if they share a row.
-			ui.Row(c).FillWidth().Gap(24).AlignItems(ui.Start).Children(func() {
-				ui.Column(c).Grow(1).Gap(6).Children(func() {
-					a.settingsLabel(c, p, "响应体上限（MB）")
-					a.responseLimitField(c, p)
-				})
-				ui.Column(c).Grow(1).Gap(6).Children(func() {
-					a.settingsLabel(c, p, "请求超时（秒）")
-					a.timeoutField(c, p)
-				})
+			ui.Column(c).FillWidth().Gap(6).Children(func() {
+				a.settingsLabel(c, p, "响应体上限（MB）")
+				a.responseLimitField(c, p)
+			})
+			ui.Column(c).FillWidth().Gap(6).Children(func() {
+				a.settingsLabel(c, p, "请求超时（秒）")
+				a.timeoutField(c, p)
 			})
 			ui.Row(c).Height(design.RowGap)
 			a.settingsLabel(c, p, "更新")
@@ -344,15 +347,18 @@ func (a *app) projectLink(c *ui.Context, p design.Palette) {
 	}
 }
 
-// settingsSection draws a settings section: what it changes on the left, its
-// controls on the right.
+// settingsSection draws its title on the left and one column of controls on
+// the right, capped at ninety percent of the right area.
 func (a *app) settingsSection(c *ui.Context, p design.Palette, title, note string, controls func()) {
 	ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(24).Children(func() {
-		ui.Column(c).Width(240).Gap(4).Children(func() {
+		ui.Column(c).Width(settingsLabelColumnWidth).Gap(4).Children(func() {
 			ui.Text(c, title).Bold().FontSize(design.FontSizeTitle).TextColor(p.Text)
 			ui.Text(c, note).FontSize(design.FontSizeBody).TextColor(p.TextMuted)
 		})
-		ui.Column(c).Grow(1).Gap(6).Children(controls)
+		ui.Row(c).FillWidth().Label("设置项布局").Children(func() {
+			ui.Column(c).Grow(9).Gap(6).Children(controls)
+			ui.Row(c).Grow(1)
+		})
 	})
 }
 
@@ -440,6 +446,7 @@ func (a *app) languagePicker(c *ui.Context, p design.Palette) {
 		ui.Row(c).Grow(1)
 		ui.Icon(c, icons.Chevron).FontSize(12).TextColor(p.TextMuted)
 	})
+	btn.FillWidth()
 	if btn.Clicked() {
 		a.languageOpen = !a.languageOpen
 	}

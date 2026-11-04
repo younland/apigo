@@ -174,7 +174,7 @@ func TestHomeCollectionNameFillsTheRow(t *testing.T) {
 // advances it.
 func advanceWidth(s string) float32 {
 	var total float32
-	font := ui.Font{Family: design.FontFamily, Size: design.FontSizeTitle, Weight: 400}
+	font := ui.Font{Family: design.FontWithFallback(design.FontFamily), Size: design.FontSizeTitle, Weight: 400}
 	for _, glyph := range ui.Shape(s, font) {
 		total += glyph.Advance
 	}
