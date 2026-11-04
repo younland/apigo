@@ -387,7 +387,7 @@
   - **触发信号**：用户在文件管理器里删掉一个集合目录，首页列表还当它存在；点「打开」后是空的或者报错。
   - **根因/约束**：`followFiles()` 原来只 watch **当前打开的集合**目录（为了树跟着变），首页在 `active == ""` 时一条 watch 都没有；每帧对每个集合 `os.Stat` 又太贵（10 个集合 × 60 fps = 600 次/秒）。
   - **正确做法**：多开一条 `followList()`，watch `store.CollectionsDir()`（非递归），事件回到窗口线程后跑 `refreshMissing()`：它对每个集合 `os.Stat` 一次，得到 `map[string]bool` 缓存。顺序上**先起列表 watch 再起集合 watch**，这样 `watchLog.last()` 仍是集合 watch，原有的 watch 测试不用改。`listWatched` 保证只试一次（平台不支持也不每帧重试），新建集合时置回 `false`（这时目录才第一次存在）；换数据目录（`useDataDir`）要停掉旧 watch 再重置。列表行按 `a.collectionMissing(id)` 灰显 + `Strikethrough()`，点击/双击走 `openOrForgetCollection` → `askToForgetMissingCollection`（确认框复用 `a.ask`，动作是 `deleteCollection` = `HideCollection`，只从列表移除，目录本来就没了）。
-  - **验证方式**：`TestWatchMarksDeletedCollections`（首页首选 watch 的路径是 `CollectionsDir()`；`os.RemoveAll` 后 report 一次，`applyWatch` 后 `collectionMissing` 为真且列表仍显示该集合）、`TestHomeMarksMissingCollections`（名称最长连续墨迹 ≥ 半个 advance，即真的有中划线；点「打开」不开集合、弹出「集合不存在」、确认后 `Collections` 清空）。把 `Strikethrough()` 去掉时前者立刻报「longest ink run is 15 px of 75」。
+  - **验证方式**：`TestWatchMarksDeletedCollections`（首页首选 watch 的路径是 `CollectionsDir()`；`os.RemoveAll` 后 report 一次，`applyWatch` 后 `collectionMissing` 为真且列表仍显示该集合）、`TestHomeMarksMissingCollections`（名称最长连续墨迹 ≥ 半个 advance，即真的有中划线；点「打开」不开集合、弹出「集合不存在」、确认后 `Collections` 清空）。像素断言使用 ASCII 集合名：无 CJK 回退字体的 Linux 上，Pango 不为缺字方框生成删除线，不能用中文名判断该样式是否生效。把 `Strikethrough()` 去掉时后者立刻报「longest ink run is 15 px of 75」。
   - **适用范围**：`internal/app/app_watch.go`（`followFiles`/`followList`/`drainList`/`refreshMissing`）、`internal/app/view_home.go`、`internal/app/view_confirm.go`；以后任何「列表要跟着磁盘状态变」的地方。
 
 - **标题**：多行「标签 + 说明」要做成两列对齐：标签用 `MinWidth(最长标签)`，别给内层 Column 加 `AlignItems(Start)`

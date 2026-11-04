@@ -206,7 +206,8 @@ func longestInkRun(img *image.RGBA, r ui.Rect) int {
 func TestHomeMarksMissingCollections(t *testing.T) {
 	a := newApp()
 	a.store = store.New(t.TempDir())
-	if _, err := a.store.NewCollection("没了的集合"); err != nil {
+	// Headless Linux need not have a CJK fallback, and Pango does not strike missing-glyph boxes.
+	if _, err := a.store.NewCollection("Missing"); err != nil {
 		t.Fatal(err)
 	}
 	col := a.store.Collections[0]
